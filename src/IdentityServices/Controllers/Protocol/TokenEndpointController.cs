@@ -219,7 +219,7 @@ public class TokenEndpointController(
     }
 
     /// <summary>
-    ///     AB#9729: issues the <c>octo_api</c> token of an admitted agent exchange (see
+    ///     Issues the <c>octo_api</c> token of an admitted agent exchange (see
     ///     <see cref="TenantExchangeProcessor" />, agent rules). Before it signs anything it checks, against the directory of
     ///     the agent's tenant (wired into the request), that
     ///     <list type="bullet">
@@ -248,6 +248,8 @@ public class TokenEndpointController(
             logger.LogWarning(
                 "Agent exchange rejected: the presenting client '{ClientId}' of tenant '{TenantId}' is not a confidential, exchange-only client",
                 request.ClientId, outcome.TargetTenantId);
+            await tenantExchangeProcessor.RecordAgentExchangeRefusedAsync(outcome.AgentClientId!,
+                outcome.TargetTenantId!, "the presenting client is not a confidential, exchange-only client");
             return ForbidWithError(Errors.UnauthorizedClient,
                 $"the client '{AgentExchangeConstants.ExchangeClientId}' must be confidential and allow only the token exchange");
         }
@@ -255,6 +257,8 @@ public class TokenEndpointController(
         var requested = request.GetScopes();
         if (requested.Any(s => !string.Equals(s, AgentExchangeConstants.IssuedScope, StringComparison.Ordinal)))
         {
+            await tenantExchangeProcessor.RecordAgentExchangeRefusedAsync(outcome.AgentClientId!,
+                outcome.TargetTenantId!, "a scope other than octo_api was requested");
             return ForbidWithError(Errors.InvalidScope,
                 $"an agent exchange issues only the scope '{AgentExchangeConstants.IssuedScope}'");
         }
@@ -266,6 +270,8 @@ public class TokenEndpointController(
             logger.LogWarning(
                 "Agent exchange rejected: agent client '{AgentClientId}' does not exist or is disabled in tenant '{TenantId}'",
                 outcome.AgentClientId, outcome.TargetTenantId);
+            await tenantExchangeProcessor.RecordAgentExchangeRefusedAsync(outcome.AgentClientId!,
+                outcome.TargetTenantId!, "the agent client does not exist or is disabled");
             return ForbidWithError(Errors.InvalidGrant, "the agent client does not exist or is disabled");
         }
 

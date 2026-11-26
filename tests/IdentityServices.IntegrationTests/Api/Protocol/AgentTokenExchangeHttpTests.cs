@@ -5,10 +5,15 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
 using IdentityServices.IntegrationTests.Infrastructure;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.JsonWebTokens;
+using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
 using Xunit;
@@ -16,13 +21,12 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Api.Protocol;
 
 /// <summary>
-///     AB#9729 over the real token endpoint: an agent token (scope <c>octo_agent</c>) becomes a short-lived <c>octo_api</c>
+///     The agent token exchange over the real token endpoint: an agent token (scope <c>octo_agent</c>) becomes a short-lived <c>octo_api</c>
 ///     token only through MCP's confidential client <c>octo-mcpServices-agent-exchange</c> in the agent's own tenant, and
 ///     the issued token always carries <c>act</c>. Abuse cases: a public client of that id, the public MCP device client,
 ///     any other client, a disabled agent client, a second exchange of the issued token.
 /// </summary>
-public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory factory)
-    : IntegrationTestBase(factory)
+public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLifetime
 {
     private const string AgentScope = "octo_agent";
     private const string ApiScope = "octo_api";
@@ -32,6 +36,45 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
     private const string AgentSecret = "agent9729-builder-secret";
     private const string AgentRole = "Agent9729Role";
     private const string TokenExchange = "urn:ietf:params:oauth:grant-type:token-exchange";
+
+    private static readonly string[] CreatedClients =
+        [AgentClientId, ExchangeClientId, "agent9729-device-like", "agent9729-other"];
+
+    private readonly WebApplicationFactory<Program> _host;
+    private readonly IIdentityAuditService _audit = Substitute.For<IIdentityAuditService>();
+
+    public AgentTokenExchangeHttpTests(CustomWebApplicationFactory factory) : base(factory)
+    {
+        // The audit service records every refusal; a substitute lets the tests assert that each refusal is audited.
+        _host = factory.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IIdentityAuditService>();
+            services.AddSingleton(_audit);
+        }));
+    }
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    /// <summary>Removes every client the tests created, so the shared system tenant keeps no test client.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        using (var scope = _host.Services.CreateScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IOctoClientStore>();
+            foreach (var clientId in CreatedClients)
+            {
+                if (await store.FindRtClientByIdAsync(clientId) is { } client)
+                {
+                    await store.DeleteAsync(client.ClientId!);
+                }
+            }
+        }
+
+        await _host.DisposeAsync();
+    }
+
+    private void ShouldBeAudited(string reasonPart) =>
+        _audit.Received().StoreFailureAsync("Token Exchange Failure", Arg.Is<string>(m => m.Contains(reasonPart)));
 
     [Fact]
     public async Task AgentToken_ExchangedByTheConfidentialExchangeClient_IsAnOctoApiTokenOfTheAgent_WithAct()
@@ -67,6 +110,7 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
         status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
         body["error"]!.GetValue<string>().Should().Be("unauthorized_client");
         body.ContainsKey("access_token").Should().BeFalse();
+        ShouldBeAudited("not a confidential, exchange-only client");
     }
 
     [Fact]
@@ -119,6 +163,7 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
 
             status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
             body["error"]!.GetValue<string>().Should().Be("invalid_grant");
+            ShouldBeAudited("does not exist or is disabled");
         }
         finally
         {
@@ -140,14 +185,45 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
         body["error"]!.GetValue<string>().Should().Be("invalid_grant");
     }
 
+    [Fact]
+    public async Task ExchangeClientWithASecretAndASecondGrant_IsRefused()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeAsync(exchangeClientConfidential: true, extraGrant: "client_credentials");
+        var agentToken = await RequestAgentTokenAsync(ct);
+
+        var (status, body) = await ExchangeAsync(ExchangeClientId, ExchangeSecret, agentToken, ct);
+
+        status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
+        body["error"]!.GetValue<string>().Should().Be("unauthorized_client",
+            "an exchange client that can also act on its own is no boundary");
+        ShouldBeAudited("not a confidential, exchange-only client");
+    }
+
+    [Fact]
+    public async Task AScopeOtherThanOctoApi_IsRefused()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeAsync(exchangeClientConfidential: true, extraScope: AgentScope);
+        var agentToken = await RequestAgentTokenAsync(ct);
+
+        var (status, body) = await ExchangeAsync(ExchangeClientId, ExchangeSecret, agentToken, ct,
+            scope: $"{ApiScope} {AgentScope}");
+
+        status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
+        body["error"]!.GetValue<string>().Should().Be("invalid_scope");
+        ShouldBeAudited("a scope other than octo_api");
+    }
+
     // ---------- arrangement ----------
 
     private static string Hash(string secret) =>
         Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(secret)));
 
-    private async Task ArrangeAsync(bool exchangeClientConfidential)
+    private async Task ArrangeAsync(bool exchangeClientConfidential, string? extraGrant = null,
+        string? extraScope = null)
     {
-        using (var scope = Factory.Services.CreateScope())
+        using (var scope = _host.Services.CreateScope())
         {
             var resourceStore = scope.ServiceProvider.GetRequiredService<IOctoResourceStore>();
             foreach (var name in new[] { AgentScope, ApiScope })
@@ -178,7 +254,7 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
         await AddRoleAsync((await FindClientAsync(AgentClientId))!, AgentRole);
 
         // A fresh exchange client per test: confidential or public decides the case.
-        using (var scope = Factory.Services.CreateScope())
+        using (var scope = _host.Services.CreateScope())
         {
             var store = scope.ServiceProvider.GetRequiredService<IOctoClientStore>();
             if (await store.FindRtClientByIdAsync(ExchangeClientId) is { } existing)
@@ -189,7 +265,9 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
 
         await CreateClientAsync(ExchangeClientId, b =>
         {
-            b.WithGrantTypes(TokenExchange).WithScopes(ApiScope).RequirePkce(false);
+            b.WithGrantTypes(extraGrant == null ? [TokenExchange] : [TokenExchange, extraGrant])
+                .WithScopes(extraScope == null ? [ApiScope] : [ApiScope, extraScope])
+                .RequirePkce(false);
             if (exchangeClientConfidential)
             {
                 b.WithSecret("SharedSecret", Hash(ExchangeSecret)).RequireClientSecret();
@@ -199,7 +277,7 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
 
     private async Task SetAgentEnabledAsync(bool enabled)
     {
-        using var scope = Factory.Services.CreateScope();
+        using var scope = _host.Services.CreateScope();
         await scope.ServiceProvider.GetRequiredService<IOctoClientStore>().MutateAsync(AgentClientId, c =>
         {
             c.Enabled = enabled;
@@ -209,7 +287,7 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
 
     private async Task CreateClientAsync(string clientId, Action<RtClientBuilder> configure)
     {
-        using var scope = Factory.Services.CreateScope();
+        using var scope = _host.Services.CreateScope();
         var clientStore = scope.ServiceProvider.GetRequiredService<IOctoClientStore>();
         if (await clientStore.FindRtClientByIdAsync(clientId) != null)
         {
@@ -223,13 +301,13 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
 
     private async Task<RtClient?> FindClientAsync(string clientId)
     {
-        using var scope = Factory.Services.CreateScope();
+        using var scope = _host.Services.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<IOctoClientStore>().FindRtClientByIdAsync(clientId);
     }
 
     private async Task AddRoleAsync(RtClient client, string roleName)
     {
-        using var scope = Factory.Services.CreateScope();
+        using var scope = _host.Services.CreateScope();
         var roleManager = scope.ServiceProvider
             .GetRequiredService<Microsoft.AspNetCore.Identity.RoleManager<RtRole>>();
         if (await roleManager.FindByNameAsync(roleName) == null)
@@ -246,7 +324,7 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
 
     private async Task<string> RequestAgentTokenAsync(CancellationToken ct)
     {
-        using var http = Factory.CreateClient();
+        using var http = _host.CreateClient();
         var response = await http.PostAsync("/connect/token", new FormUrlEncodedContent(
             new Dictionary<string, string>
             {
@@ -265,16 +343,16 @@ public sealed class AgentTokenExchangeHttpTests(CustomWebApplicationFactory fact
     }
 
     private async Task<(HttpStatusCode Status, JsonObject Body)> ExchangeAsync(string presentingClientId,
-        string? presentingSecret, string subjectToken, CancellationToken ct)
+        string? presentingSecret, string subjectToken, CancellationToken ct, string scope = ApiScope)
     {
-        using var http = Factory.CreateClient();
+        using var http = _host.CreateClient();
         var form = new Dictionary<string, string>
         {
             ["grant_type"] = TokenExchange,
             ["client_id"] = presentingClientId,
             ["subject_token"] = subjectToken,
             ["subject_token_type"] = "urn:ietf:params:oauth:token-type:access_token",
-            ["scope"] = ApiScope,
+            ["scope"] = scope,
             ["acr_values"] = $"tenant:{NormalizedSystemTenantId}"
         };
         if (presentingSecret != null)

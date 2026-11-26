@@ -103,6 +103,7 @@ public class TenantExchangeServiceAccountSubjectTests
     [InlineData(ServiceAccountExchangeRefusal.SystemTenant, "unauthorized_client", "cross-tenant access")]
     [InlineData(ServiceAccountExchangeRefusal.UnknownTenant, "unauthorized_client", "cross-tenant access")]
     [InlineData(ServiceAccountExchangeRefusal.SourceClientUnknown, "invalid_grant", "the subject service account")]
+    [InlineData(ServiceAccountExchangeRefusal.AgentClient, "unauthorized_client", "an agent token")]
     [InlineData(ServiceAccountExchangeRefusal.StateUnreadable, "access_denied", "the service-account exchange could not be checked")]
     public async Task ServiceAccountSubject_RefusedByTheGate_MapsToAStableError_AndRaisesTheAudit(
         ServiceAccountExchangeRefusal refusal, string error, string descriptionPrefix)
@@ -228,7 +229,7 @@ public class TenantExchangeServiceAccountSubjectTests
         await _crossTenant.ReceivedWithAnyArgs().ValidateCrossTenantAccessAsync(default!, default!, default!);
     }
 
-    // ---------- AB#9729: agent tokens (scope octo_agent) ----------
+    // ---------- agent tokens (scope octo_agent) ----------
 
     private const string AgentExchangeClient = "octo-mcpServices-agent-exchange";
 
@@ -270,7 +271,7 @@ public class TenantExchangeServiceAccountSubjectTests
     [Fact]
     public async Task AgentSubject_ThroughTheServiceAccountExchange_IsRefusedBeforeTheGate()
     {
-        // The AB#9777 path: an admitting gate and the shadow client as presenter must not carry an agent token into
+        // The service-account path: an admitting gate and the shadow client as presenter must not carry an agent token into
         // a related tenant.
         _gate.EvaluateAsync(Source, ClientId, Target).Returns(new ServiceAccountExchangeDecision
         {

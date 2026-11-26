@@ -3,7 +3,7 @@ dependencies:
   - System.Identity-2.14.0
 
 # The API scopes: the three platform scopes (660…14 – 660…16) the LLM gateway scope (660…17)
-# and the agent scope (660…18, AB#9729).
+# and the agent scope (660…18).
 # Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
 entities:
 
@@ -107,7 +107,7 @@ entities:
         value: false
 
   # ===========================================================================
-  # AGENT SCOPE (660…18, AB#9729) — the scope of an agent's service-account
+  # AGENT SCOPE (660…18) — the scope of an agent's service-account
   # client (MCP create_agent assigns it instead of octo_api). It is attached to
   # the MCP resource indicator only (mcpApi, 660…21), never to octoAPI: no
   # platform API accepts it, so an agent token opens nothing by itself. MCP

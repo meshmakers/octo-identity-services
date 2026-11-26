@@ -157,7 +157,7 @@ public class TenantExchangeProcessor(
         public string? SourceTenantId { get; init; }
 
         /// <summary>
-        ///     AB#9729: the subject was an agent token (scope <c>octo_agent</c>) of this client, exchanged by MCP's
+        ///     The subject was an agent token (scope <c>octo_agent</c>) of this client, exchanged by MCP's
         ///     agent-exchange client in the agent's own tenant. The token is issued for this client with scope
         ///     <c>octo_api</c> and <c>act</c> = this client id.
         /// </summary>
@@ -300,8 +300,8 @@ public class TenantExchangeProcessor(
             return ExchangeOutcome.Failed(generationCheck.Error!, generationCheck.ErrorDescription!);
         }
 
-        // AB#9729: an agent token (scope octo_agent) is exchanged only by MCP's agent-exchange client, only in its own
-        // tenant, and never through the service-account (AB#9777) or user rules. The agent-exchange client exchanges
+        // An agent token (scope octo_agent) is exchanged only by MCP's agent-exchange client, only in its own
+        // tenant, and never through the service-account or user rules. The agent-exchange client exchanges
         // nothing else.
         var agentRefusal = await CheckAgentExchangeAsync(claims, isServiceAccountSubject, subjectId, sourceTenantId,
             targetTenantId, presentingClientId);
@@ -313,7 +313,7 @@ public class TenantExchangeProcessor(
         if (HasScope(claims, AgentExchangeConstants.AgentScope))
         {
             logger.LogInformation(
-                "Token exchange admitted: agent client '{ClientId}' of tenant '{TenantId}' exchanged by '{PresentingClientId}'",
+                "Token exchange: agent client '{ClientId}' of tenant '{TenantId}' passed the agent rules (presented by '{PresentingClientId}'); the directory checks follow",
                 sourceClientId, sourceTenantId, presentingClientId);
             return ExchangeOutcome.SucceededForAgent(sourceClientId!, sourceTenantId);
         }
@@ -481,7 +481,7 @@ public class TenantExchangeProcessor(
     }
 
     /// <summary>
-    ///     The agent rules of AB#9729 (fail closed). Returns the refusal, or <c>null</c> when the request may go on: either
+    ///     The agent rules (fail closed). Returns the refusal, or <c>null</c> when the request may go on: either
     ///     an admitted agent exchange (the subject carries <see cref="AgentExchangeConstants.AgentScope" />) or a request
     ///     that has nothing to do with agents.
     ///     <list type="bullet">
@@ -554,6 +554,14 @@ public class TenantExchangeProcessor(
     }
 
     /// <summary>
+    ///     Audits a refusal of an agent exchange that the token endpoint decides against the tenant's directory (presenting
+    ///     client not confidential and exchange-only, scope other than octo_api, agent client missing or disabled), like
+    ///     every other exchange refusal.
+    /// </summary>
+    public Task RecordAgentExchangeRefusedAsync(string agentClientId, string tenantId, string reason) =>
+        RaiseExchangeFailureAsync(agentClientId, tenantId, tenantId, $"agent exchange: {reason}");
+
+    /// <summary>
     ///     True when the token carries <paramref name="scope" />, in either wire form: one claim per scope (the platform's
     ///     access token shape) or one space-delimited claim.
     /// </summary>
@@ -565,6 +573,8 @@ public class TenantExchangeProcessor(
     private static ExchangeOutcome MapServiceAccountRefusal(ServiceAccountExchangeDecision decision,
         string targetTenantId) => decision.Refusal switch
     {
+        ServiceAccountExchangeRefusal.AgentClient => ExchangeOutcome.Failed(Errors.UnauthorizedClient,
+            "an agent token is exchanged only by the MCP agent-exchange client within its own tenant"),
         ServiceAccountExchangeRefusal.SourceClientUnknown => ExchangeOutcome.Failed(Errors.InvalidGrant,
             "the subject service account does not exist in its tenant or is disabled"),
         ServiceAccountExchangeRefusal.MirroredClient => ExchangeOutcome.Failed(Errors.AccessDenied,

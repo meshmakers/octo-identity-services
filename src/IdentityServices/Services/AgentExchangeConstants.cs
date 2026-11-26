@@ -1,7 +1,7 @@
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
 /// <summary>
-///     Constants of the agent token exchange (AB#9729, option A): an agent's service-account client gets the API scope
+///     Constants of the agent token exchange: an agent's service-account client gets the API scope
 ///     <see cref="AgentScope" /> instead of <c>octo_api</c>, so its token opens no platform API by itself. Only the MCP
 ///     service may turn it into a short-lived <c>octo_api</c> token, through the RFC 8693 exchange presented by its
 ///     confidential client <see cref="ExchangeClientId" /> in the agent's own tenant (<c>TenantExchangeProcessor</c>,

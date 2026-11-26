@@ -13,7 +13,9 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   other way is refused: another tenant, the public MCP device client, a shadow client of the service-account exchange
   (AB#9777 no longer carries an agent token into a parent, sibling or child tenant), any other client, a public client
   of that id, a user subject with `octo_agent`, a subject that is no agent token, and a second exchange of the issued
-  token (it carries `act`). Details: `docs/cross-tenant-authentication.md`, "Agent token exchange".
+  token (it carries `act`). The service-account gate also refuses every subject client registered with `octo_agent`
+  (`AgentClient`), so a token the agent requested without any scope cannot take that path either; every refusal is
+  audited. Details: `docs/cross-tenant-authentication.md`, "Agent token exchange".
 
 - AB#9803 New: read-only seed check `scripts/identity-bootstrap-seed-check.sh`. Lists per tenant database whether the 41
   entities and 23 associations of System.Identity.Bootstrap 1.10.0 exist exactly once, with their CK type, and whether a

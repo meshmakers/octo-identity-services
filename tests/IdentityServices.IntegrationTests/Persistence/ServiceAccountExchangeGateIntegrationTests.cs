@@ -57,6 +57,22 @@ public class ServiceAccountExchangeGateIntegrationTests : IClassFixture<Identity
     }
 
     [Fact]
+    public async Task AgentClient_IsRefused_EvenWhenProvisionedInAChild()
+    {
+        // An agent client is recognized by its registration (allowed scope octo_agent), so a token the agent requested
+        // without any scope cannot take this path into a related tenant either.
+        var h = await ArrangeAsync();
+        var client = await CreateServiceAccountAsync(h.G, roleNameInSource: "GroupAdmin",
+            shape: c => c.AllowedScopes = new AttributeStringValueList { "octo_agent" });
+        await ProvisionShadowAsync(h.A, h.G, client, "CompanyWriter");
+
+        var decision = await CreateGate().EvaluateAsync(h.G, client, h.A);
+
+        decision.IsAdmitted.Should().BeFalse();
+        decision.Refusal.Should().Be(ServiceAccountExchangeRefusal.AgentClient);
+    }
+
+    [Fact]
     public async Task Child_Provisioned_IsAdmitted_WithoutTheAllowList()
     {
         var h = await ArrangeAsync();
@@ -477,12 +493,13 @@ public class ServiceAccountExchangeGateIntegrationTests : IClassFixture<Identity
 
     /// <summary>A client-credentials service account in <paramref name="tenantId" />, optionally holding a role there.</summary>
     private async Task<string> CreateServiceAccountAsync(string tenantId, string? roleNameInSource = null,
-        string? clientId = null, bool enabled = true, bool autoProvision = false, string? provisionedByParent = null)
+        string? clientId = null, bool enabled = true, bool autoProvision = false, string? provisionedByParent = null,
+        Action<RtClient>? shape = null)
     {
         clientId ??= $"octo-pipeline-sa-{Guid.NewGuid():N}"[..28];
         var repo = await RepositoryAsync(tenantId);
         var rtId = await InsertClientAsync(repo, clientId, enabled, requireSecret: true, autoProvision,
-            provisionedByParent);
+            provisionedByParent, shape);
         if (roleNameInSource != null)
         {
             await AssignRoleAsync(repo, rtId, roleNameInSource);

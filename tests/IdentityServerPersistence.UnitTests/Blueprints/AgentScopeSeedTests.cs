@@ -5,7 +5,7 @@ using YamlDotNet.RepresentationModel;
 namespace IdentityServerPersistence.UnitTests.Blueprints;
 
 /// <summary>
-///     AB#9729: <c>System.Identity.Bootstrap</c> registers the agent scope <c>octo_agent</c> and attaches it to the MCP
+///     <c>System.Identity.Bootstrap</c> registers the agent scope <c>octo_agent</c> and attaches it to the MCP
 ///     resource indicator only, so a token of an agent's service-account client opens no platform API by itself (every
 ///     platform API requires <c>octo_api</c>, which the octoAPI resource carries). No client of the blueprint allows it.
 ///     Pinned against the seed files themselves, because the HTTP integration fixtures do not apply the blueprint.
