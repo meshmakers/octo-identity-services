@@ -31,14 +31,14 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
     private const string AgentScope = "octo_agent";
     private const string ApiScope = "octo_api";
     private const string ExchangeClientId = "octo-mcpServices-agent-exchange";
-    private const string ExchangeSecret = "agent9729-exchange-secret";
-    private const string AgentClientId = "agent9729-builder";
-    private const string AgentSecret = "agent9729-builder-secret";
+    private const string ExchangeSecret = "agent-xchg-exchange-secret";
+    private const string AgentClientId = "agent-xchg-builder";
+    private const string AgentSecret = "agent-xchg-builder-secret";
     private const string AgentRole = "Agent9729Role";
     private const string TokenExchange = "urn:ietf:params:oauth:grant-type:token-exchange";
 
     private static readonly string[] CreatedClients =
-        [AgentClientId, ExchangeClientId, "agent9729-device-like", "agent9729-other"];
+        [AgentClientId, ExchangeClientId, "agent-xchg-device-like", "agent-xchg-other"];
 
     private readonly WebApplicationFactory<Program> _host;
     private readonly IIdentityAuditService _audit = Substitute.For<IIdentityAuditService>();
@@ -118,13 +118,13 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
     {
         var ct = TestContext.Current.CancellationToken;
         await ArrangeAsync(exchangeClientConfidential: true);
-        await CreateClientAsync("agent9729-device-like", b => b
+        await CreateClientAsync("agent-xchg-device-like", b => b
             .WithGrantTypes(TokenExchange, "urn:ietf:params:oauth:grant-type:device_code")
             .WithScopes(ApiScope)
             .RequirePkce(false));
         var agentToken = await RequestAgentTokenAsync(ct);
 
-        var (status, body) = await ExchangeAsync("agent9729-device-like", null, agentToken, ct);
+        var (status, body) = await ExchangeAsync("agent-xchg-device-like", null, agentToken, ct);
 
         status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
         body["error"]!.GetValue<string>().Should().Be("unauthorized_client");
@@ -136,15 +136,15 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
     {
         var ct = TestContext.Current.CancellationToken;
         await ArrangeAsync(exchangeClientConfidential: true);
-        await CreateClientAsync("agent9729-other", b => b
+        await CreateClientAsync("agent-xchg-other", b => b
             .WithGrantTypes(TokenExchange)
             .WithScopes(ApiScope)
-            .WithSecret("SharedSecret", Hash("agent9729-other-secret"))
+            .WithSecret("SharedSecret", Hash("agent-xchg-other-secret"))
             .RequireClientSecret()
             .RequirePkce(false));
         var agentToken = await RequestAgentTokenAsync(ct);
 
-        var (status, body) = await ExchangeAsync("agent9729-other", "agent9729-other-secret", agentToken, ct);
+        var (status, body) = await ExchangeAsync("agent-xchg-other", "agent-xchg-other-secret", agentToken, ct);
 
         status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
         body["error"]!.GetValue<string>().Should().Be("unauthorized_client");

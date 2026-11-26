@@ -73,7 +73,7 @@ public class ConcurrentTenantSeedImportIntegrationTests : IClassFixture<Identity
         await initialization.InitializeAsync();
 
         var (entities, associations) = ReadSeed();
-        entities.Should().HaveCount(42, "System.Identity.Bootstrap 1.12.0 seeds 42 entities");
+        entities.Should().HaveCount(43, "System.Identity.Bootstrap 1.12.0 seeds 43 entities");
         associations.Should().HaveCount(23, "and 23 associations (a parse that finds none would check nothing)");
 
         foreach (var tenantId in tenantIds)

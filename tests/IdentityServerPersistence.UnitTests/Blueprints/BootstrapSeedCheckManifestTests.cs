@@ -38,7 +38,7 @@ public class BootstrapSeedCheckManifestTests
             .Select(e => (RtId: Scalar(e, "rtId")!.ToLowerInvariant(), CkTypeId: Scalar(e, "ckTypeId")!))
             .ToList();
 
-        seed.Should().HaveCount(42, "System.Identity.Bootstrap 1.12.0 seeds 42 entities");
+        seed.Should().HaveCount(43, "System.Identity.Bootstrap 1.12.0 seeds 43 entities");
         ManifestEntities().Should().BeEquivalentTo(seed);
     }
 

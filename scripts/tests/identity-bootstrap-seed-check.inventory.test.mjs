@@ -135,7 +135,7 @@ const test = (name, fn) => { fn(); passed++; console.log(`ok - ${name}`); };
 
 test("a tenant holding the complete seed has no finding, also a grandchild with clients mirrored from above", () => {
     const { lines } = run({ systemDb: "octosystem", tenants: ["octosystem", "clean", "grandchild"] });
-    assert.equal(lines[0], "SEED\tSystem.Identity.Bootstrap-1.12.0\t42\t23");
+    assert.equal(lines[0], "SEED\tSystem.Identity.Bootstrap-1.12.0\t43\t23");
     assert.equal(lines[lines.length - 1], "END");
     assert.deepEqual(rows(lines), []);
     assert.deepEqual(sums(lines), [
