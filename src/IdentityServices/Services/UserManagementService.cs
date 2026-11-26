@@ -52,8 +52,8 @@ public class UserManagementService(
             }
 
             // AB#8161: administrators are TenantOwners members, not holders of direct roles. The group carries
-            // every built-in role including SecretManagement. A tenant without the group (bootstrap blueprint
-            // not applied) keeps the direct roles so that the administrator is not locked out.
+            // every built-in role except AiBudgetAdmin, including SecretManagement. A tenant without the group
+            // (bootstrap blueprint not applied) keeps the direct roles so that the administrator is not locked out.
             if (!await AddToTenantOwnersAsync(adminUser))
             {
                 await AddDirectAdministratorRolesAsync(adminUser);
@@ -62,8 +62,8 @@ public class UserManagementService(
     }
 
     /// <summary>
-    ///     The first administrator becomes a member of <c>TenantOwners</c>, which carries every built-in role including
-    ///     <c>SecretManagement</c> (the bootstrap seed assigns all others, <c>TenantOwnersSecretManagementGrant</c> adds
+    ///     The first administrator becomes a member of <c>TenantOwners</c>, which carries every built-in role except
+    ///     <c>AiBudgetAdmin</c>, including <c>SecretManagement</c> (the bootstrap seed assigns all others, <c>TenantOwnersSecretManagementGrant</c> adds
     ///     <c>SecretManagement</c> once per tenant after the blueprint apply). Every member inherits these roles, clients
     ///     included, and through the parent-administration endpoints they reach the tenant's descendants. Without it the
     ///     administrator holds only the direct roles above and, under the role change guard (grant only built-in roles

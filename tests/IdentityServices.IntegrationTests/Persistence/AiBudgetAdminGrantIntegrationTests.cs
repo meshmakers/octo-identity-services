@@ -179,7 +179,7 @@ public class AiBudgetAdminGrantIntegrationTests : IClassFixture<IdentityServices
         var directAdmin = await InsertUserAsync(repo, "direct-admin");
         var owner = await InsertUserAsync(repo, "owner");
         var adminPanelOnly = await InsertUserAsync(repo, "adminpanel-only");
-        var shadow = await InsertUserAsync(repo, "xt_parent_gerald");
+        var shadow = await InsertUserAsync(repo, "xt_parent_admin");
         var serviceAccount = await InsertClientAsync(repo);
         await InsertGroupAsync(repo, TenantOwnersRtId, "TenantOwners");
 
