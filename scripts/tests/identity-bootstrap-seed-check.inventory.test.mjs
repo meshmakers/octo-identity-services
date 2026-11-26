@@ -18,7 +18,7 @@ const INVENTORY = readFileSync(join(here, "..", "identity-bootstrap-seed-check.i
 const manifestCode = INVENTORY.slice(INVENTORY.indexOf("const SEED_ENTITIES"), INVENTORY.indexOf("const clean"));
 const { SEED_ENTITIES, SEED_ASSOCIATIONS } = vm.runInNewContext(
     manifestCode + "\n({ SEED_ENTITIES: SEED_ENTITIES, SEED_ASSOCIATIONS: SEED_ASSOCIATIONS })");
-assert.equal(SEED_ENTITIES.length, 42);
+assert.equal(SEED_ENTITIES.length, 43);
 assert.equal(SEED_ASSOCIATIONS.length, 23);
 
 const ROOT_COLLECTION = {
@@ -139,9 +139,9 @@ test("a tenant holding the complete seed has no finding, also a grandchild with 
     assert.equal(lines[lines.length - 1], "END");
     assert.deepEqual(rows(lines), []);
     assert.deepEqual(sums(lines), [
-        "octosystem\t42\t42\t-\t-\t23\t23\t0\t0",
-        "clean\t42\t42\t-\t-\t23\t23\t0\t0",
-        "grandchild\t42\t42\t-\t-\t23\t23\t0\t0"
+        "octosystem\t43\t43\t-\t-\t23\t23\t0\t0",
+        "clean\t43\t43\t-\t-\t23\t23\t0\t0",
+        "grandchild\t43\t43\t-\t-\t23\t23\t0\t0"
     ]);
 });
 
@@ -158,7 +158,7 @@ test("missing, duplicate, wrong-type and foreign entities and missing or duplica
         `${SCOPE} TYPE-MISMATCH`
     ].sort());
     const sum = sums(lines)[0].split("\t");
-    assert.deepEqual(sum.slice(0, 4), ["broken", "41", "42", ROLE]);
+    assert.deepEqual(sum.slice(0, 4), ["broken", "42", "43", ROLE]);
     assert.deepEqual(sum[4].split(",").sort(), [CLIENT, SCOPE].sort());
     assert.deepEqual(sum.slice(5), ["21", "23", "2", "1"]);
 });
