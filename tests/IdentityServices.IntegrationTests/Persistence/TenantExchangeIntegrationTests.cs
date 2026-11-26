@@ -508,6 +508,52 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     }
 
     /// <summary>
+    ///     Production shape since System.Identity.Bootstrap 1.11.0: TenantOwners carries every role except AiBudgetAdmin,
+    ///     which goes to nobody through the group. A provisioned administrator stays a plain group member and never gets
+    ///     AiBudgetAdmin into a direct role list.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_TenantOwnersCarriesAllButAiBudgetAdmin_MappingIsOnlyAGroupMember()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+        await CreateRoleAsync(ctx.SystemContext, ctx.ChildTenantId, "AiBudgetAdmin");
+        var groupStore = new GroupStore(new FixedTenantResolver(ctx.ChildRepo));
+        await groupStore.SetRoleIdsAsync(ctx.OwnersGroupId, ctx.ChildRoleIds.Select(r => r.ToString()).ToList());
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeCreated);
+
+        var mapping = (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single();
+        mapping.MappedRoleIds.Should().BeNullOrEmpty("the group carries every role a provisioned administrator gets");
+        (await IsMemberOfTenantOwnersAsync(ctx.ChildRepo, mapping)).Should().BeTrue();
+    }
+
+    /// <summary>
+    ///     Fallback without a usable TenantOwners group (new mapping and repair of a role-less one): the direct role list
+    ///     holds every role of the tenant except AiBudgetAdmin.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProvisionCurrentUser_RoleListFallback_NeverContainsAiBudgetAdmin(bool roleLessMappingExists)
+    {
+        var ctx = await ArrangeProvisioningAsync();
+        var aiBudgetAdmin = await CreateRoleAsync(ctx.SystemContext, ctx.ChildTenantId, "AiBudgetAdmin");
+        if (roleLessMappingExists)
+        {
+            await CreateMappingAsync(ctx.SystemContext, ctx.ChildTenantId, ctx.ParentTenantId, ctx.UserId, ctx.UserName,
+                mappedRoleIds: []);
+        }
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(roleLessMappingExists
+            ? AdminProvisioningController.OutcomeRepaired
+            : AdminProvisioningController.OutcomeCreated);
+
+        var mapping = (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single();
+        mapping.MappedRoleIds.Should().BeEquivalentTo(ctx.ChildRoleIds.Select(r => r.ToString()));
+        mapping.MappedRoleIds.Should().NotContain(aiBudgetAdmin.ToString());
+    }
+
+    /// <summary>
     ///     The same symptom the bug was found with: the login path's find-or-create stores a bare mapping next to
     ///     the shadow user, and a later ProvisionCurrentUser used to answer "provisioned" without writing anything.
     /// </summary>

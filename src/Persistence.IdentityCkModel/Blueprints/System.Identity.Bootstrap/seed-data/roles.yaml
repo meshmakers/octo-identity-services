@@ -2,12 +2,12 @@ $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
   - System.Identity-2.14.0
 
-# The seventeen built-in roles (660…01 – 660…0E, 660…60 – 660…62).
+# The eighteen built-in roles (660…01 – 660…0E, 660…60 – 660…63).
 # Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
 entities:
 
   # ===========================================================================
-  # ROLES (660…01 – 660…0E, 660…60 – 660…62) — seventeen built-in roles. Names match
+  # ROLES (660…01 – 660…0E, 660…60 – 660…63) — eighteen built-in roles. Names match
   # `Meshmakers.Octo.Communication.Contracts.CommonConstants.*Role`. The seed
   # writes Name + NormalizedName only; SubjectIds / IdentityRoleIds / RoleClaims
   # are populated at runtime by IdentityServer's RoleManager and must not be
@@ -191,3 +191,18 @@ entities:
       - roleId: System.Identity/GrantsPermission
         targetRtId: '660000000000000000000052'
         targetCkTypeId: System.Identity/DataPermission
+
+  # 1.11.0: AiBudgetAdmin sets the monthly LLM spend cap of a tenant (AI service, system/v1/aiSpendCaps,
+  # octo-cli SetAiSpendCap). It counts only in a token of the SYSTEM tenant: the AI service refuses a holder from any
+  # child tenant, so seeding it into every tenant grants nothing there. It is NOT assigned to TenantOwners. The identity
+  # setup step AiBudgetAdminGrant gives it once to the human administrators of the system tenant (direct edges, never in a
+  # child tenant, never to a group or client); further people get it from a holder (AddUserToRole). The AI service
+  # accepts it only in a person's own token (sub, no act), never in a client-credentials, impersonated or delegated token.
+  - rtId: '660000000000000000000063'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: AiBudgetAdmin
+    attributes:
+      - id: System/Name
+        value: AiBudgetAdmin
+      - id: System.Identity/NormalizedName
+        value: AIBUDGETADMIN

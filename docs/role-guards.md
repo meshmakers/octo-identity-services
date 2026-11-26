@@ -32,7 +32,7 @@ Current identity schema (migration) version: `23` (migration 21→22 added the `
 `IRoleChangeGuard` (`src/IdentityServices/Authorization/RoleChange/RoleChangeGuard.cs`, scoped) is the one rule set for changes of the **direct** roles of a
 user. Callers: `UsersController` (`DELETE users/{u}`; the role endpoints and `POST users/{u}/merge` run the methods, section
 "REST facades of the role and merge endpoints" in `docs/identity-rest-facades.md`), the three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`) and `IUserMergeService` (source user). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
-(`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
+(`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, `AiBudgetAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
 provisioning and the login group rules assign roles through the store and stay unrestricted (`TheGuard_IsNotCalledFromTheUserStoreOrTheUserManager…` pins the constructors).
 The role change guards on groups, mappings and role definitions (next section) and on client roles (section below) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
 
@@ -63,7 +63,7 @@ Tenant owners could not hand out the roles their own blueprints seed (e.g. `Ener
 `role-not-held` judged every built-in role alike. Decision by Gerald (2026-11-08): holders of `UserManagement` may grant **app roles**;
 **platform roles** keep the role change guard protection.
 
-- **Platform role** = a built-in role (stored `RtWellKnownName`) that `System.Identity.Bootstrap` seeds (today the 17 roles of
+- **Platform role** = a built-in role (stored `RtWellKnownName`) that `System.Identity.Bootstrap` seeds (today the 18 roles of
   `seed-data/roles.yaml`: `TenantManagement`, `UserManagement`, `StreamDataAdmin`, `SecretManagement`, `DataModelManagement`, …).
   **App role** = every other built-in role, i.e. one a blueprint installed in the tenant seeds. Custom roles (no `RtWellKnownName`) stay free for everybody.
 - **How the service knows.** `IPlatformRoleCatalog` / `BootstrapPlatformRoleCatalog` (`Authorization/RoleChange/PlatformRoleCatalog.cs`, singleton) reads the
@@ -190,3 +190,29 @@ role `66…0B`), so no seed bump is needed.
 
 - **Tests:** `UserManagementServiceTests` (membership added / not twice / missing group) and `Api/Setup/SetupAdminTenantOwnersTests` (real MongoDB: setup via REST, the admin adds
   another user to `TenantOwners`, control case without the membership = 403 `role-not-held`, re-run refused without a second edge, guard not injected into setup/group store).
+
+## AiBudgetAdmin: one-time grant in the system tenant
+
+`AiBudgetAdmin` (660…63, System.Identity.Bootstrap 1.11.0) is a platform role: under the guard only a holder grants it.
+The seed gives it to nobody (not `TenantOwners`, not the first administrator), so the setup step `AiBudgetAdminGrant`
+(`src/IdentityServerPersistence/Services/RoleGrants/AiBudgetAdminGrant.cs`) gives it once to the human administrators of
+the **system tenant**: the same rule and code as `SecretManagementAdminGrant` (`AdministratorRoleOneTimeGrant`: local
+users holding `AdminPanelManagement` and `TenantManagement`, direct or through groups; direct edges only; no group,
+client or `xt_` shadow user). Never in a child tenant. The marker `AiBudgetAdminGrant` in the system tenant's
+configuration makes it run once; a run that finds no administrator (fresh installation) writes no marker, so the first
+setup after the first administrator exists grants it (in practice the next start of the identity service, so restart it once after the first setup; until then nobody can set an LLM cap). A run that finds administrators who all hold the role already
+(an earlier grant whose marker write failed) writes the marker and grants nobody. The guard is unchanged: the step writes through the repository as
+the platform's own bootstrap, like the other one-time grants.
+
+Operator path for a further person: a holder runs `octo-cli -c AddUserToRole -un <user> -r AiBudgetAdmin` in the system
+tenant (self-grants stay refused). Removing it: `RemoveUserFromRole`; the step does not re-add it. Do not give it to a
+client: the AI service accepts the role only in a person's own token (a `sub` claim and no `act` claim), so a
+client-credentials, impersonated or delegated token is refused whatever roles it carries. A service token proves no
+provenance by `tenant_id` alone: a mirrored client's credentials are also its parent's and can ask for a system-tenant
+token explicitly (`ClientCredentialsTenantProcessor`).
+
+The role exists in every tenant (seeded with the others), but it counts only in the system tenant: every service that
+checks it must also check that the token's tenant is the system tenant and that the token is a person's own, as the AI
+service does. Recovery when the last
+holder is gone: delete the `AiBudgetAdminGrant` configuration row of the system tenant and restart the identity
+service; the next setup grants the role once more to the system tenant's human administrators.

@@ -120,4 +120,13 @@ public static class IdentityServiceConstants
     /// Present = never run again.
     /// </summary>
     public const string TenantOwnersSecretManagementGrantKey = "TenantOwnersSecretManagementGrant";
+
+    /// <summary>
+    /// TenantConfiguration row of the system tenant recording that the one-time grant of <c>AiBudgetAdmin</c>
+    /// to its existing human administrators (<c>AiBudgetAdminGrant</c>) has run. Present = never run again.
+    /// </summary>
+    public const string AiBudgetAdminGrantKey = "AiBudgetAdminGrant";
+
+    /// <summary>Platform role that sets the monthly LLM spend cap of a tenant in the AI service.</summary>
+    public const string AiBudgetAdminRole = "AiBudgetAdmin";
 }

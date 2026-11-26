@@ -2,9 +2,11 @@ $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
   - System.Identity-2.14.0
 
-# The TenantOwners group (660…40). This seed assigns every built-in role except SecretManagement (660…60);
+# The TenantOwners group (660…40). This seed assigns every built-in role except SecretManagement (660…60)
+# and AiBudgetAdmin (660…63: granted once to the system tenant's human administrators by the identity setup
+# step AiBudgetAdminGrant and then by its holders, never through this group);
 # the identity service adds that edge once per tenant after the blueprint apply (TenantOwnersSecretManagementGrant),
-# so the group carries every built-in role including SecretManagement. Every member inherits it, clients
+# so the group carries every built-in role but AiBudgetAdmin, SecretManagement included. Every member inherits it, clients
 # and provisioned parent-tenant administrators included, and through the parent-administration endpoints
 # (mirror secret rotation, bot jobs) it reaches the tenant's descendants.
 # Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
