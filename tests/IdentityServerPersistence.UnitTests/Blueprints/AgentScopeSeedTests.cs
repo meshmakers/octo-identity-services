@@ -79,7 +79,7 @@ public class AgentScopeSeedTests
 
         blueprintId.Should().NotBeNull();
         Version.Parse(blueprintId!["System.Identity.Bootstrap-".Length..]).Should()
-            .BeGreaterThanOrEqualTo(new Version(1, 11, 0), "1.11.0 added octo_agent");
+            .BeGreaterThanOrEqualTo(new Version(1, 12, 0), "1.12.0 added octo_agent");
     }
 
     private static IEnumerable<YamlMappingNode> AllSeedEntities() => SeedDataPaths().SelectMany(Entities);

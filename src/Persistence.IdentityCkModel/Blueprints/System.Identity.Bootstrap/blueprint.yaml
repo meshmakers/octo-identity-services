@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.11.0
+blueprintId: System.Identity.Bootstrap-1.12.0
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (18 roles), the five OIDC identity resources, five API
@@ -15,7 +15,7 @@ description: |
   the system tenant, and holders grant it to further people.
   The version bump makes every existing tenant re-import the seed, which creates the role. No other change.
 
-  1.11.0 (AB#9729): adds the API scope `octo_agent` (660…18) and attaches it to the MCP resource indicator mcpApi
+  1.12.0 (AB#9729): adds the API scope `octo_agent` (660…18) and attaches it to the MCP resource indicator mcpApi
   (660…21) only, never to octoAPI. MCP's create_agent gives an agent's service-account client this scope instead of
   octo_api, so an agent token opens no platform API by itself; MCP accepts it only from an agent of the token's tenant
   and exchanges it (RFC 8693, its confidential client octo-mcpServices-agent-exchange, same tenant only) for a

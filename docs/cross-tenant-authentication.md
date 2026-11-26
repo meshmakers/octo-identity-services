@@ -242,7 +242,7 @@ Tests: `ServiceAccountExchangeGateIntegrationTests` (every rule against MongoDB)
 ## Agent token exchange
 
 An agent's service-account client (created by MCP's `create_agent`) holds the API scope `octo_agent` instead of
-`octo_api`. The scope is attached to the MCP resource indicator only (`mcpApi`, System.Identity.Bootstrap 1.11.0), so a
+`octo_api`. The scope is attached to the MCP resource indicator only (`mcpApi`, System.Identity.Bootstrap 1.12.0), so a
 token of the agent opens no platform API: every API requires `octo_api`. MCP accepts the token only from a client that is
 an agent of the token's tenant and, for every downstream call, exchanges it for a short-lived `octo_api` token.
 

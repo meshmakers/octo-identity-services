@@ -6,7 +6,7 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 ## Unreleased
 
 - AB#9729 New: agent token exchange. An agent's service-account client gets the new API scope `octo_agent`
-  (System.Identity.Bootstrap 1.11.0, entity 660…18, attached to the MCP resource indicator only, never to octoAPI), so its
+  (System.Identity.Bootstrap 1.12.0, entity 660…18, attached to the MCP resource indicator only, never to octoAPI), so its
   token opens no platform API. The RFC 8693 exchange turns it into a five-minute `octo_api` token for the agent client
   (`act` = the agent client id, `amr=agent_exchange`, no refresh token) only when it is presented by the confidential,
   exchange-only client `octo-mcpServices-agent-exchange` of the agent's own tenant and the agent client is enabled. Every
