@@ -34,7 +34,7 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
     private const string ExchangeSecret = "agent-xchg-exchange-secret";
     private const string AgentClientId = "agent-xchg-builder";
     private const string AgentSecret = "agent-xchg-builder-secret";
-    private const string AgentRole = "Agent9729Role";
+    private const string AgentRole = "AgentExchangeTestRole";
     private const string TokenExchange = "urn:ietf:params:oauth:grant-type:token-exchange";
 
     private static readonly string[] CreatedClients =
@@ -42,6 +42,10 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
 
     private readonly WebApplicationFactory<Program> _host;
     private readonly IIdentityAuditService _audit = Substitute.For<IIdentityAuditService>();
+
+    // What ArrangeAsync created in the shared system tenant (it reuses what exists); DisposeAsync removes exactly that.
+    private readonly List<OctoObjectId> _createdScopeIds = [];
+    private bool _createdRole;
 
     public AgentTokenExchangeHttpTests(CustomWebApplicationFactory factory) : base(factory)
     {
@@ -55,7 +59,9 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    /// <summary>Removes every client the tests created, so the shared system tenant keeps no test client.</summary>
+    /// <summary>
+    ///     Removes every client, API scope and role the tests created, so the shared system tenant keeps nothing of them.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         using (var scope = _host.Services.CreateScope())
@@ -66,6 +72,22 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
                 if (await store.FindRtClientByIdAsync(clientId) is { } client)
                 {
                     await store.DeleteAsync(client.ClientId!);
+                }
+            }
+
+            var resourceStore = scope.ServiceProvider.GetRequiredService<IOctoResourceStore>();
+            foreach (var scopeId in _createdScopeIds)
+            {
+                await resourceStore.DeleteApiScopeAsync(scopeId);
+            }
+
+            if (_createdRole)
+            {
+                var roleManager = scope.ServiceProvider
+                    .GetRequiredService<Microsoft.AspNetCore.Identity.RoleManager<RtRole>>();
+                if (await roleManager.FindByNameAsync(AgentRole) is { } role)
+                {
+                    await roleManager.DeleteAsync(role);
                 }
             }
         }
@@ -230,9 +252,11 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
             {
                 if (await resourceStore.GetApiScopeByNameAsync(name) == null)
                 {
+                    var scopeId = OctoObjectId.GenerateNewId();
+                    _createdScopeIds.Add(scopeId);
                     await resourceStore.CreateApiScopeAsync(new RtApiScope
                     {
-                        RtId = OctoObjectId.GenerateNewId(),
+                        RtId = scopeId,
                         Name = name,
                         DisplayName = name,
                         Enabled = true,
@@ -313,6 +337,7 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
         if (await roleManager.FindByNameAsync(roleName) == null)
         {
             await roleManager.CreateAsync(new RtRoleBuilder().WithName(roleName).Build());
+            _createdRole = true;
         }
 
         var clientRoleStore = scope.ServiceProvider.GetRequiredService<IClientRoleStore>();
