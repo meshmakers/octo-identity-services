@@ -196,7 +196,8 @@ entities:
   # octo-cli SetAiSpendCap). It counts only in a token of the SYSTEM tenant: the AI service refuses a holder from any
   # child tenant, so seeding it into every tenant grants nothing there. It is NOT assigned to TenantOwners. The identity
   # setup step AiBudgetAdminGrant gives it once to the human administrators of the system tenant (direct edges, never in a
-  # child tenant, never to a group or client); further people or ops clients get it from a holder (AddUserToRole).
+  # child tenant, never to a group or client); further people get it from a holder (AddUserToRole). The AI service
+  # accepts it only in a person's own token (sub, no act), never in a client-credentials, impersonated or delegated token.
   - rtId: '660000000000000000000063'
     ckTypeId: System.Identity/Role
     rtWellKnownName: AiBudgetAdmin

@@ -205,10 +205,14 @@ setup after the first administrator exists grants it. A run that finds administr
 the platform's own bootstrap, like the other one-time grants.
 
 Operator path for a further person: a holder runs `octo-cli -c AddUserToRole -un <user> -r AiBudgetAdmin` in the system
-tenant (`AddClientToRole` for a client; self-grants stay refused). Removing it: `RemoveUserFromRole`; the step does not
-re-add it.
+tenant (self-grants stay refused). Removing it: `RemoveUserFromRole`; the step does not re-add it. Do not give it to a
+client: the AI service accepts the role only in a person's own token (a `sub` claim and no `act` claim), so a
+client-credentials, impersonated or delegated token is refused whatever roles it carries. A service token proves no
+provenance by `tenant_id` alone: a mirrored client's credentials are also its parent's and can ask for a system-tenant
+token explicitly (`ClientCredentialsTenantProcessor`).
 
 The role exists in every tenant (seeded with the others), but it counts only in the system tenant: every service that
-checks it must also check that the token's tenant is the system tenant, as the AI service does. Recovery when the last
+checks it must also check that the token's tenant is the system tenant and that the token is a person's own, as the AI
+service does. Recovery when the last
 holder is gone: delete the `AiBudgetAdminGrant` configuration row of the system tenant and restart the identity
 service; the next setup grants the role once more to the system tenant's human administrators.
