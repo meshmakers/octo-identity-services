@@ -2,7 +2,8 @@ $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
   - System.Identity-2.14.0
 
-# The API scopes: the three platform scopes (660…14 – 660…16) and the LLM gateway scope (660…17).
+# The API scopes: the three platform scopes (660…14 – 660…16) the LLM gateway scope (660…17)
+# and the agent scope (660…18).
 # Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
 entities:
 
@@ -96,6 +97,37 @@ entities:
         value: ai.llm.invoke
       - id: System/DisplayName
         value: Call the central-key LLM gateway of the AI service
+      - id: System.Identity/ResourceClaims
+        value: []
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: false
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  # ===========================================================================
+  # AGENT SCOPE (660…18) — the scope of an agent's service-account
+  # client (MCP create_agent assigns it instead of octo_api). It is attached to
+  # the MCP resource indicator only (mcpApi, 660…21), never to octoAPI: no
+  # platform API accepts it, so an agent token opens nothing by itself. MCP
+  # accepts it only from a client that is an agent of the token's tenant and
+  # exchanges it (RFC 8693, its confidential client
+  # octo-mcpServices-agent-exchange, same tenant only) for a short-lived
+  # octo_api token with act = the agent client id. No client of this blueprint
+  # allows it. Not advertised in the discovery document.
+  # ===========================================================================
+
+  - rtId: '660000000000000000000018'
+    ckTypeId: System.Identity/ApiScope
+    rtWellKnownName: octo_agent
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: octo_agent
+      - id: System/DisplayName
+        value: Agent access through the MCP service only
       - id: System.Identity/ResourceClaims
         value: []
       - id: System.Identity/ShowInDiscoveryDocument

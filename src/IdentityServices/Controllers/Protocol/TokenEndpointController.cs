@@ -62,6 +62,15 @@ public class TokenEndpointController(
         var request = HttpContext.GetOpenIddictServerRequest() ??
                       throw new InvalidOperationException("The OpenIddict request cannot be retrieved.");
 
+        // Every token an agent client gets carries octo_agent, so every OctoMesh API but the MCP agent endpoint
+        // can refuse it. The class is closed here, for every grant type: an agent client gets tokens only through
+        // client_credentials (where octo_agent is always added), and only with the scope octo_agent.
+        var agentRefusal = await RefuseAgentClientGrantAsync(request);
+        if (agentRefusal != null)
+        {
+            return agentRefusal;
+        }
+
         if (request.IsClientCredentialsGrantType())
         {
             return await HandleClientCredentialsAsync(request);
@@ -89,6 +98,82 @@ public class TokenEndpointController(
         }
 
         return ForbidWithError(Errors.UnsupportedGrantType, "The specified grant type is not supported.");
+    }
+
+    /// <summary>
+    ///     The token rules of an agent client (a client whose allowed scopes contain <c>octo_agent</c>). It gets tokens
+    ///     only through <c>client_credentials</c> (any other grant type - token exchange, on-behalf-of, impersonation,
+    ///     authorization code, device code, refresh token - is refused with <c>unauthorized_client</c>, even when an
+    ///     administrator allowed it on the client), and it requests no scope but <c>octo_agent</c> (<c>invalid_scope</c>,
+    ///     e.g. for <c>octo_agent octo_api</c>). No other client gets a token as an agent client either: an on-behalf-of or
+    ///     impersonation request whose <c>requested_client_id</c> names an agent client is refused with
+    ///     <c>unauthorized_client</c>, whatever MayActAs edge an administrator set up. Every refusal is audited like the
+    ///     other agent exchange refusals. Returns <c>null</c> when the request may go on.
+    /// </summary>
+    private async Task<IActionResult?> RefuseAgentClientGrantAsync(OpenIddictRequest request)
+    {
+        if (string.IsNullOrEmpty(request.ClientId))
+        {
+            return null;
+        }
+
+        if (string.Equals(request.GrantType, DelegationConstants.OnBehalfOfGrantType, StringComparison.Ordinal) ||
+            string.Equals(request.GrantType, ImpersonationConstants.ImpersonationGrantType, StringComparison.Ordinal))
+        {
+            var requestedClientId = (string?)request[ImpersonationConstants.RequestedClientIdParameter];
+            if (!string.IsNullOrEmpty(requestedClientId) &&
+                IsAgentClient(await clientStore.FindRtClientByIdAsync(requestedClientId)))
+            {
+                logger.LogWarning(
+                    "Token request of client {ClientId} refused: grant type {GrantType} names the agent client {AgentClientId}",
+                    request.ClientId, request.GrantType, requestedClientId);
+                await AuditAgentRefusalAsync(request, requestedClientId,
+                    $"client '{request.ClientId}' asked for a token as the agent client ({request.GrantType})");
+                return ForbidWithError(Errors.UnauthorizedClient,
+                    "no client gets a token as an agent client; an agent client gets tokens only through client_credentials");
+            }
+        }
+
+        var client = await clientStore.FindRtClientByIdAsync(request.ClientId);
+        if (!IsAgentClient(client))
+        {
+            return null;
+        }
+
+        if (!request.IsClientCredentialsGrantType())
+        {
+            logger.LogWarning("Token request of agent client {ClientId} refused: grant type {GrantType}",
+                request.ClientId, request.GrantType);
+            await AuditAgentRefusalAsync(request, request.ClientId,
+                $"an agent client gets tokens only through client_credentials ({request.GrantType})");
+            return ForbidWithError(Errors.UnauthorizedClient,
+                "an agent client gets tokens only through client_credentials");
+        }
+
+        if (request.GetScopes().Any(scope => !string.Equals(scope, AgentExchangeConstants.AgentScope, StringComparison.Ordinal)))
+        {
+            logger.LogWarning("Token request of agent client {ClientId} refused: a scope other than octo_agent",
+                request.ClientId);
+            await AuditAgentRefusalAsync(request, request.ClientId, "an agent client requested a scope other than octo_agent");
+            return ForbidWithError(Errors.InvalidScope, "an agent client requests no scope but octo_agent");
+        }
+
+        return null;
+    }
+
+    private static bool IsAgentClient(RtClient? client) =>
+        client?.AllowedScopes?.Contains(AgentExchangeConstants.AgentScope, StringComparer.Ordinal) == true;
+
+    /// <summary>
+    ///     Audits an agent-client refusal of the token endpoint (event <c>Token Exchange Failure</c>, like every agent
+    ///     exchange refusal), in the tenant the request names (<c>acr_values=tenant:…</c>).
+    /// </summary>
+    private async Task AuditAgentRefusalAsync(OpenIddictRequest request, string agentClientId, string reason)
+    {
+        var tenantId = request.GetAcrValues()
+            .Select(v => v.StartsWith("tenant:", StringComparison.Ordinal) ? v["tenant:".Length..] : null)
+            .FirstOrDefault(v => !string.IsNullOrEmpty(v)) ?? "(no tenant named)";
+        await tenantExchangeProcessor.RecordAgentExchangeRefusedAsync(agentClientId, tenantId, reason);
     }
 
     private async Task<IActionResult> HandleClientCredentialsAsync(OpenIddictRequest request)
@@ -130,6 +215,16 @@ public class TokenEndpointController(
         await tokenClaimsService.PopulateClientClaimsAsync(identity, client);
 
         var scopes = request.GetScopes();
+        // A token of an agent client always carries octo_agent, also when the request named no scope. Every
+        // OctoMesh API but the MCP agent endpoint refuses a token with octo_agent (403 AgentTokenNotAccepted); a
+        // scope-less agent token would carry nothing to refuse and could read where no scope is required (GraphQL
+        // queries of the asset repository).
+        if (client.AllowedScopes?.Contains(AgentExchangeConstants.AgentScope, StringComparer.Ordinal) == true &&
+            !scopes.Contains(AgentExchangeConstants.AgentScope, StringComparer.Ordinal))
+        {
+            scopes = scopes.Add(AgentExchangeConstants.AgentScope);
+        }
+
         identity.SetScopes(scopes);
         identity.SetResources(await tokenClaimsService.ResolveAudiencesAsync(scopes));
         identity.SetDestinations(OctoClaimsDestinations.Resolve);
@@ -145,6 +240,11 @@ public class TokenEndpointController(
             (string?)request["acr_values"],
             HttpContext.RequestAborted,
             request.ClientId);
+
+        if (outcome.Error == null && outcome.AgentClientId != null)
+        {
+            return await SignInAgentExchangeAsync(request, outcome);
+        }
 
         if (outcome.Error == null && outcome.ShadowClient != null)
         {
@@ -210,6 +310,84 @@ public class TokenEndpointController(
         principal.SetIssuedTokenLifetime(TenantExchangeProcessor.ServiceAccountTokenLifetime);
         principal.SetAccessTokenLifetime(TenantExchangeProcessor.ServiceAccountTokenLifetime);
 
+        return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+    }
+
+    /// <summary>
+    ///     Issues the <c>octo_api</c> token of an admitted agent exchange (see
+    ///     <see cref="TenantExchangeProcessor" />, agent rules). Before it signs anything it checks, against the directory of
+    ///     the agent's tenant (wired into the request), that
+    ///     <list type="bullet">
+    ///         <item>the presenting client is the confidential, enabled, exchange-only client
+    ///             <see cref="AgentExchangeConstants.ExchangeClientId" /> (a public client of that id, which a tenant
+    ///             administrator could create, would let the agent exchange its own token without MCP);</item>
+    ///         <item>the agent client exists and is enabled (a disabled agent gets no downstream token);</item>
+    ///         <item>the request asks for no other scope than <see cref="AgentExchangeConstants.IssuedScope" />.</item>
+    ///     </list>
+    ///     The token is client-credentials-shaped for the agent client (<c>client_id</c> = agent client, no <c>sub</c>,
+    ///     the agent client's effective roles, the agent's tenant), carries <c>act</c> = the agent client id (flat string,
+    ///     <see cref="DelegationConstants.ActClaimType" />) and <c>amr</c> = <see cref="AgentExchangeConstants.AuthenticationMethod" />,
+    ///     scope <c>octo_api</c> only, lives 5 minutes and has no refresh token. Because it carries <c>act</c> it can never
+    ///     be exchanged again.
+    /// </summary>
+    private async Task<IActionResult> SignInAgentExchangeAsync(OpenIddictRequest request,
+        TenantExchangeProcessor.ExchangeOutcome outcome)
+    {
+        var presenter = await clientStore.FindRtClientByIdAsync(request.ClientId!);
+        if (presenter is not { Enabled: true, RequireClientSecret: true } ||
+            presenter.ClientSecrets?.Any() != true ||
+            presenter.AllowOfflineAccess ||
+            presenter.RedirectUris?.Any() == true ||
+            (presenter.AllowedGrantTypes?.ToList() ?? []) is not [GrantTypes.TokenExchange])
+        {
+            logger.LogWarning(
+                "Agent exchange rejected: the presenting client '{ClientId}' of tenant '{TenantId}' is not a confidential, exchange-only client",
+                request.ClientId, outcome.TargetTenantId);
+            await tenantExchangeProcessor.RecordAgentExchangeRefusedAsync(outcome.AgentClientId!,
+                outcome.TargetTenantId!, "the presenting client is not a confidential, exchange-only client");
+            return ForbidWithError(Errors.UnauthorizedClient,
+                $"the client '{AgentExchangeConstants.ExchangeClientId}' must be confidential and allow only the token exchange");
+        }
+
+        var requested = request.GetScopes();
+        if (requested.Any(s => !string.Equals(s, AgentExchangeConstants.IssuedScope, StringComparison.Ordinal)))
+        {
+            await tenantExchangeProcessor.RecordAgentExchangeRefusedAsync(outcome.AgentClientId!,
+                outcome.TargetTenantId!, "a scope other than octo_api was requested");
+            return ForbidWithError(Errors.InvalidScope,
+                $"an agent exchange issues only the scope '{AgentExchangeConstants.IssuedScope}'");
+        }
+
+        var agentClient = await clientStore.FindRtClientByIdAsync(outcome.AgentClientId!);
+        if (agentClient is not { Enabled: true } ||
+            !string.Equals(agentClient.ClientId, outcome.AgentClientId, StringComparison.Ordinal))
+        {
+            logger.LogWarning(
+                "Agent exchange rejected: agent client '{AgentClientId}' does not exist or is disabled in tenant '{TenantId}'",
+                outcome.AgentClientId, outcome.TargetTenantId);
+            await tenantExchangeProcessor.RecordAgentExchangeRefusedAsync(outcome.AgentClientId!,
+                outcome.TargetTenantId!, "the agent client does not exist or is disabled");
+            return ForbidWithError(Errors.InvalidGrant, "the agent client does not exist or is disabled");
+        }
+
+        var identity = CreateIdentity();
+        identity.SetClaim(Claims.Subject, agentClient.ClientId);
+        identity.SetClaim(OctoClaimTypes.TenantId, outcome.TargetTenantId);
+        await tokenClaimsService.PopulateClientClaimsAsync(identity, agentClient);
+        identity.AddClaim(new Claim(DelegationConstants.ActClaimType, agentClient.ClientId!));
+        identity.SetClaim(Claims.AuthenticationMethodReference, AgentExchangeConstants.AuthenticationMethod);
+
+        string[] scopes = [AgentExchangeConstants.IssuedScope];
+        identity.SetScopes(scopes);
+        identity.SetResources(await tokenClaimsService.ResolveAudiencesAsync(scopes));
+        identity.SetDestinations(OctoClaimsDestinations.Resolve);
+
+        var principal = new ClaimsPrincipal(identity);
+        principal.SetIssuedTokenLifetime(TenantExchangeProcessor.ServiceAccountTokenLifetime);
+        principal.SetAccessTokenLifetime(TenantExchangeProcessor.ServiceAccountTokenLifetime);
+
+        logger.LogInformation("Agent exchange: issued an octo_api token for agent client '{AgentClientId}' of tenant '{TenantId}'",
+            agentClient.ClientId, outcome.TargetTenantId);
         return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 

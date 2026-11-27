@@ -22,9 +22,9 @@
 // NO-DATABASE (tenant database not found). Present = the rtId exists in the tenant; unexpected = DUPLICATE,
 // TYPE-MISMATCH or FOREIGN-PROVISIONING.
 
-// Generated from src/Persistence.IdentityCkModel/Blueprints/System.Identity.Bootstrap/seed-data (blueprint 1.11.0);
+// Generated from src/Persistence.IdentityCkModel/Blueprints/System.Identity.Bootstrap/seed-data (blueprint 1.12.0);
 // BootstrapSeedCheckManifestTests fails when the seed and this list differ.
-const SEED_BLUEPRINT = "System.Identity.Bootstrap-1.11.0";
+const SEED_BLUEPRINT = "System.Identity.Bootstrap-1.12.0";
 const SEED_ENTITIES = [
     { rtId: "660000000000000000000020", ckTypeId: "System.Identity/ApiResource" },
     { rtId: "660000000000000000000021", ckTypeId: "System.Identity/ApiResource" },
@@ -32,6 +32,7 @@ const SEED_ENTITIES = [
     { rtId: "660000000000000000000015", ckTypeId: "System.Identity/ApiScope" },
     { rtId: "660000000000000000000016", ckTypeId: "System.Identity/ApiScope" },
     { rtId: "660000000000000000000017", ckTypeId: "System.Identity/ApiScope" },
+    { rtId: "660000000000000000000018", ckTypeId: "System.Identity/ApiScope" },
     { rtId: "660000000000000000000032", ckTypeId: "System.Identity/Client" },
     { rtId: "660000000000000000000033", ckTypeId: "System.Identity/Client" },
     { rtId: "660000000000000000000034", ckTypeId: "System.Identity/Client" },

@@ -86,5 +86,7 @@ entities:
           - octo_api
           - octo_api.read_only
           - octo_api.data_model_management
+          # The agent scope; the MCP audience is the only one that carries it.
+          - octo_agent
       - id: System.Identity/AllowedAccessTokenSigningAlgorithms
         value: []

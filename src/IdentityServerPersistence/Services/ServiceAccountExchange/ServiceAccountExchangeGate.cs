@@ -62,7 +62,14 @@ public enum ServiceAccountExchangeRefusal
     NotPermitted,
 
     /// <summary>The state needed for the decision could not be read (fail closed).</summary>
-    StateUnreadable
+    StateUnreadable,
+
+    /// <summary>
+    ///     The subject client is an agent client (its allowed scopes contain <c>octo_agent</c>). An agent's token reaches
+    ///     the platform only through the MCP service in its own tenant, never through this exchange, whatever scope the
+    ///     token itself was requested with.
+    /// </summary>
+    AgentClient
 }
 
 /// <summary>Decision of <see cref="IServiceAccountExchangeGate" />.</summary>
@@ -130,6 +137,9 @@ public sealed class ServiceAccountExchangeGate(
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     ILogger<ServiceAccountExchangeGate> logger) : IServiceAccountExchangeGate
 {
+    /// <summary>The API scope of an agent's service-account client (System.Identity.Bootstrap).</summary>
+    internal const string AgentScope = "octo_agent";
+
     /// <inheritdoc />
     public async Task<ServiceAccountExchangeDecision> EvaluateAsync(string sourceTenantId, string sourceClientId,
         string targetTenantId)
@@ -196,6 +206,14 @@ public sealed class ServiceAccountExchangeGate(
         {
             return ServiceAccountExchangeDecision.Refused(ServiceAccountExchangeRefusal.SourceClientUnknown,
                 "the subject client does not exist in the source tenant or is disabled", relation);
+        }
+
+        // An agent client is recognized by its registration, not by the scope its token carries: an agent may request a
+        // token without any scope, which carries no octo_agent claim but is still the agent's token.
+        if (sourceClient.AllowedScopes?.Any(s => string.Equals(s, AgentScope, StringComparison.Ordinal)) == true)
+        {
+            return ServiceAccountExchangeDecision.Refused(ServiceAccountExchangeRefusal.AgentClient,
+                "the subject client is an agent client (allowed scope octo_agent)", relation);
         }
 
         if (sourceClient.AutoProvisionInChildTenants ||

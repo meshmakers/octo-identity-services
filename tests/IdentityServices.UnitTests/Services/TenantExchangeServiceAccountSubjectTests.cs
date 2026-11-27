@@ -103,6 +103,7 @@ public class TenantExchangeServiceAccountSubjectTests
     [InlineData(ServiceAccountExchangeRefusal.SystemTenant, "unauthorized_client", "cross-tenant access")]
     [InlineData(ServiceAccountExchangeRefusal.UnknownTenant, "unauthorized_client", "cross-tenant access")]
     [InlineData(ServiceAccountExchangeRefusal.SourceClientUnknown, "invalid_grant", "the subject service account")]
+    [InlineData(ServiceAccountExchangeRefusal.AgentClient, "unauthorized_client", "an agent token")]
     [InlineData(ServiceAccountExchangeRefusal.StateUnreadable, "access_denied", "the service-account exchange could not be checked")]
     public async Task ServiceAccountSubject_RefusedByTheGate_MapsToAStableError_AndRaisesTheAudit(
         ServiceAccountExchangeRefusal refusal, string error, string descriptionPrefix)
@@ -227,6 +228,136 @@ public class TenantExchangeServiceAccountSubjectTests
         await _gate.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default!, default!);
         await _crossTenant.ReceivedWithAnyArgs().ValidateCrossTenantAccessAsync(default!, default!, default!);
     }
+
+    // ---------- agent tokens (scope octo_agent) ----------
+
+    private const string AgentExchangeClient = "octo-mcpServices-agent-exchange";
+
+    [Theory]
+    [InlineData("array")]
+    [InlineData("space-delimited")]
+    public async Task AgentSubject_PresentedByTheAgentExchangeClient_InItsOwnTenant_IsAdmittedForTheAgentClient(
+        string scopeForm)
+    {
+        object scope = scopeForm == "array" ? new[] { "octo_agent" } : "octo_agent";
+        var token = CreateToken(new Dictionary<string, object>
+        {
+            [Claims.ClientId] = ClientId, ["tenant_id"] = Target, [Claims.Scope] = scope
+        });
+
+        var outcome = await CreateSut().ProcessAsync(token, AccessTokenType, $"tenant:{Target}", Ct,
+            AgentExchangeClient);
+
+        outcome.Error.Should().BeNull();
+        outcome.AgentClientId.Should().Be(ClientId);
+        outcome.TargetTenantId.Should().Be(Target);
+        outcome.ShadowClient.Should().BeNull("the agent exchange never runs the service-account rules");
+        await _gate.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default!, default!);
+    }
+
+    [Fact]
+    public async Task AgentSubject_IntoAnotherTenant_IsRefused_EvenByTheAgentExchangeClient()
+    {
+        var outcome = await CreateSut().ProcessAsync(AgentToken(Source), AccessTokenType, $"tenant:{Target}", Ct,
+            AgentExchangeClient);
+
+        outcome.Error.Should().Be(Errors.UnauthorizedClient);
+        outcome.ErrorDescription.Should().Contain("own tenant");
+        outcome.AgentClientId.Should().BeNull();
+        await _gate.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default!, default!);
+        await _grantAudit.Received(1).RecordExchangeRefusedAsync(Target, Source, ClientId, Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task AgentSubject_ThroughTheServiceAccountExchange_IsRefusedBeforeTheGate()
+    {
+        // The service-account path: an admitting gate and the shadow client as presenter must not carry an agent token into
+        // a related tenant.
+        _gate.EvaluateAsync(Source, ClientId, Target).Returns(new ServiceAccountExchangeDecision
+        {
+            Refusal = ServiceAccountExchangeRefusal.None,
+            Relation = ServiceAccountExchangeRelation.Child,
+            ShadowClient = new RtClient { RtId = OctoObjectId.GenerateNewId(), ClientId = ShadowClientId, Enabled = true },
+            RoleNames = new HashSet<string> { "TargetReader" }
+        });
+
+        var outcome = await CreateSut().ProcessAsync(AgentToken(Source), AccessTokenType, $"tenant:{Target}", Ct,
+            ShadowClientId);
+
+        outcome.Error.Should().Be(Errors.UnauthorizedClient);
+        outcome.ShadowClient.Should().BeNull();
+        outcome.AgentClientId.Should().BeNull();
+        await _gate.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default!, default!);
+    }
+
+    [Theory]
+    [InlineData("octo-mcpServices-device")]
+    [InlineData("octo-cli")]
+    [InlineData("OCTO-MCPSERVICES-AGENT-EXCHANGE")]
+    public async Task AgentSubject_PresentedByAnyOtherClient_IsRefused_InItsOwnTenantToo(string presenter)
+    {
+        var outcome = await CreateSut().ProcessAsync(AgentToken(Target), AccessTokenType, $"tenant:{Target}", Ct,
+            presenter);
+
+        outcome.Error.Should().Be(Errors.UnauthorizedClient);
+        outcome.AgentClientId.Should().BeNull();
+        await _audit.Received(1).StoreFailureAsync("Token Exchange Failure",
+            Arg.Is<string>(m => m.Contains("agent exchange")));
+    }
+
+    [Fact]
+    public async Task AgentScopeOnAUserSubject_IsRefused()
+    {
+        var token = CreateToken(new Dictionary<string, object>
+        {
+            [Claims.Subject] = "68b0000000000000000000a1", ["tenant_id"] = Target, [Claims.ClientId] = "octo-cli",
+            [Claims.Scope] = new[] { "octo_agent" }
+        });
+
+        var outcome = await CreateSut().ProcessAsync(token, AccessTokenType, $"tenant:{Target}", Ct,
+            AgentExchangeClient);
+
+        outcome.Error.Should().Be(Errors.InvalidGrant);
+        outcome.AgentClientId.Should().BeNull();
+        await _crossTenant.DidNotReceiveWithAnyArgs().ValidateCrossTenantAccessAsync(default!, default!, default!);
+    }
+
+    [Fact]
+    public async Task AgentExchangeClient_WithASubjectThatIsNoAgentToken_IsRefused()
+    {
+        var token = CreateToken(new Dictionary<string, object>
+        {
+            [Claims.ClientId] = ClientId, ["tenant_id"] = Target, [Claims.Scope] = new[] { "octo_api" }
+        });
+
+        var outcome = await CreateSut().ProcessAsync(token, AccessTokenType, $"tenant:{Target}", Ct,
+            AgentExchangeClient);
+
+        outcome.Error.Should().Be(Errors.InvalidGrant);
+        outcome.ErrorDescription.Should().Contain("only agent tokens");
+        await _gate.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default!, default!);
+    }
+
+    [Fact]
+    public async Task ExchangedAgentToken_CarryingAct_CannotBeExchangedAgain()
+    {
+        var token = CreateToken(new Dictionary<string, object>
+        {
+            [Claims.ClientId] = ClientId, ["tenant_id"] = Target, [Claims.Scope] = new[] { "octo_agent" },
+            ["act"] = ClientId
+        });
+
+        var outcome = await CreateSut().ProcessAsync(token, AccessTokenType, $"tenant:{Target}", Ct,
+            AgentExchangeClient);
+
+        outcome.Error.Should().Be(Errors.InvalidGrant);
+        outcome.AgentClientId.Should().BeNull();
+    }
+
+    private string AgentToken(string tenantId) => CreateToken(new Dictionary<string, object>
+    {
+        [Claims.ClientId] = ClientId, ["tenant_id"] = tenantId, [Claims.Scope] = new[] { "octo_agent" }
+    });
 
     private TenantExchangeProcessor CreateSut(string wiredTenant = Target)
     {
