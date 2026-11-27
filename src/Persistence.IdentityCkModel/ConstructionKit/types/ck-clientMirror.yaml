@@ -19,6 +19,16 @@ types:
         name: ProvisionedAt
       - id: ${this}/SecretHashVersion
         name: SecretHashVersion
+      # 3.9.0: the role assignments identity manages on this mirror (Client.MirrorRoleNames of the original).
+      - id: ${this}/ManagedRoleNames
+        name: ManagedRoleNames
+        isOptional: true
+      - id: ${this}/DeclinedRoleNames
+        name: DeclinedRoleNames
+        isOptional: true
+      - id: ${this}/ManagedMirrorRtId
+        name: ManagedMirrorRtId
+        isOptional: true
     indexes:
       - indexType: Unique
         fields:

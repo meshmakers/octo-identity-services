@@ -43,11 +43,28 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Security
 
+- **Mirrored clients get the roles their original lists (System.Identity 3.9.0).** A confidential client-credentials
+  client carries `MirrorRoleNames`; identity assigns exactly these roles to every tracked mirror in every child tenant (nested and
+  new tenants included) after each mirror convergence (tenant setup, `ReRunTenantSetup`, `Client.ProvisionMirrorInTenant-1`,
+  `Client.ProvisionMirrors-1`, update of the original, the periodic reconciliation), idempotently. New method
+  `Client.SetMirrorRoles-1` (`roleNames`, `dryRun`): `TenantManagement` with a token of the original's tenant or one of its ancestors;
+  every added name must be a role of the original's tenant (`MIRROR_ROLE_NOT_FOUND`; a child-only role is never listed, and a child
+  grants a name only as the same role the original's tenant knows, else `roleRefused`); `TenantManagement`,
+  `UserManagement`, `SecretManagement`, `AdminPanelManagement` and `AiBudgetAdmin` are never mirrored (`MIRROR_ROLE_NOT_ALLOWED`);
+  public clients are refused (`CLIENT_NOT_CONFIDENTIAL`); the role change guard applies (role not held, self-grant). Identity
+  removes only the roles it manages, adopts a listed role a mirror already holds, leaves hand-set roles alone, records a role a
+  tenant administrator removed as declined and does not add it again (a re-created mirror is granted again), and never serves an
+  untracked copy of the client. Every grant, removal, adoption and decline is an event in the child tenant. A missing role is a
+  WARN; a failed write never fails a tenant setup and is retried by the next pass. With the default empty list nothing changes.
+  ⚠️ The inherited parent secret is still accepted by every mirror, so one leaked secret of such a client holds the mirrored role
+  in every tenant: keep lists short (prefer a narrow deploy role). See `docs/client-mirroring.md`, `docs/identity-methods.md`.
+
 - **Every token of an agent client carries `octo_agent` (AB#6054).** A client whose allowed scopes contain
   `octo_agent` gets tokens only through `client_credentials`; `octo_agent` is added when the request names no scope;
   any other grant type is refused with `unauthorized_client` and any other scope with `invalid_scope`. Together with
   the `403 AgentTokenNotAccepted` of octo-common-services an agent token reaches no OctoMesh API but the MCP agent
   endpoint. Tests: `AgentTokenExchangeHttpTests`. Docs: `docs/cross-tenant-authentication.md`.
+
 - **Token exchange for service-account subjects (AB#9777).** A client-credentials token of tenant T can be exchanged
   into T's registry parent, sibling (same parent, not the system tenant) or child U, presented by U's own public shadow
   client `xt_{T}_{clientId}` (token-exchange grant only). The issued token is client-shaped for the shadow client

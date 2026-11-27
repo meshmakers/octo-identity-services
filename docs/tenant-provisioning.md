@@ -84,6 +84,16 @@ scripts/identity-bootstrap-seed-check.sh --context <kube-context> [tenant ...]
 # local lane stack: --namespace octo-infra --pod mongodb-0 --container mongodb --password-file <file> --system-db <system db>
 ```
 
+### Mirror roles in the tenant setup
+
+The tenant setup provisions the mirrors of the flagged clients of the system tenant into every tenant at any depth (a scratch
+tenant also those of its parent) and, right after each mirror, assigns the roles the original lists in `Client.MirrorRoleNames`
+(System.Identity 3.9.0). So a new tenant, a nested tenant or a tenant after `ReRunTenantSetup` needs no manual role grant for
+such a client (for example the CD's `ci-deploy-{cluster}` with its deploy role). A role that does not exist in
+the tenant yet is a WARN and assigned on a later pass; a failed role write never fails the setup (ERROR in the log, the periodic
+mirror reconciliation retries it). A tenant administrator who removes such a role keeps it removed (declined). Rules, deny-list
+and the remaining risk of the inherited parent secret: `docs/client-mirroring.md` ("Roles mirrored by allow-list").
+
 ## Admin Provisioning (Cross-Tenant Pre-Provisioning)
 
 The `AdminProvisioningController` allows users with the TenantManagement or UserManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. The target must be the caller's own tenant or one of its registry descendants (system-tenant callers: any tenant) — `AdminProvisioningTargetScopeFilter`; before, the role was documented but not checked and any target was reachable. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.

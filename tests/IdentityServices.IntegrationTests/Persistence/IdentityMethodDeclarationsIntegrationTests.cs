@@ -56,7 +56,9 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
                 "ProvisionMirrors-1", "ProvisionMirrorInTenant-1", "RotateMirrorSecret-1", "RemoveMirror-1",
                 "SetMirrorAutoProvision-1",
                 // System.Identity 3.8.0: create, update and delete
-                "CreateClient-1", "UpdateClient-1", "DeleteClient-1"
+                "CreateClient-1", "UpdateClient-1", "DeleteClient-1",
+                // System.Identity 3.9.0: the roles a client hands to its mirrors
+                "SetMirrorRoles-1"
             ]
         },
         {
@@ -210,6 +212,9 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
 
         client.AllMethods["RotateMirrorSecret-1"].Definition.Authorization!.Roles.Should()
             .BeEquivalentTo([TenantManagement, UserManagement, "SecretManagement"]);
+
+        // System.Identity 3.9.0: the mirror role list reaches every child tenant, so only TenantManagement may set it.
+        client.AllMethods["SetMirrorRoles-1"].Definition.Authorization!.Roles.Should().BeEquivalentTo([TenantManagement]);
         var mapping = await GetTypeAsync("ExternalTenantUserMapping");
         foreach (var id in new[] { "ProvisionAdmin-1", "ProvisionAdminWithGroups-1", "ProvisionCurrentUser-1", "RemoveAdminProvisioning-1" })
         {

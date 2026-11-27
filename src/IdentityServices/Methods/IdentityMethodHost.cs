@@ -107,6 +107,8 @@ internal static class IdentityMethodHost
             servesRestFacade: true),
         For<ClientRemoveMirrorHandler>(SystemIdentityCkIds.ClientRemoveMirrorMethodId, false),
         For<ClientSetMirrorAutoProvisionHandler>(SystemIdentityCkIds.ClientSetMirrorAutoProvisionMethodId, false),
+        // System.Identity 3.9.0: the mirror role list; no secret, no REST facade.
+        For<ClientSetMirrorRolesHandler>(SystemIdentityCkIds.ClientSetMirrorRolesMethodId, false),
         // System.Identity 3.5.0: admin provisioning (AdminProvisioningController) and the mapping create
         // (ExternalTenantUserMappingsController) as static methods; no secret.
         For<ExternalTenantUserMappingProvisionAdminHandler>(

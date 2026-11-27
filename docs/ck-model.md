@@ -307,3 +307,19 @@ with update and delete, `ExternalTenantUserMapping.UpdateMapping-1` / `DeleteMap
 - **No `replacesGenericCreate`.** On the existing types the flag is a Major (row M16); on the abstract `IdentityProvider` it is not allowed at all
   (compiler error 133). `writeAccess` (3.6.0) already refuses every caller-scoped generic create, and the Bootstrap blueprint keeps seeding
   clients and data permissions through the system import.
+
+## Mirror role list (System.Identity 3.9.0)
+
+3.9.0 adds the optional attribute `Client.MirrorRoleNames` (StringArray, `TenantOwned`, so a System.Identity.Bootstrap update never
+resets an operator's list), the optional tracking attributes `ClientMirror.ManagedRoleNames`, `ClientMirror.DeclinedRoleNames`
+(StringArray) and `ClientMirror.ManagedMirrorRtId` (String), the method `Client.SetMirrorRoles-1` and its result records
+`ClientMirrorRolesResult` / `ClientMirrorRoleTenantResult` (members `RuntimeState`). Behaviour: `docs/client-mirroring.md`
+("Roles mirrored by allow-list"), method: `docs/identity-methods.md`.
+
+- **SemVer:** optional attributes on public types (row T1), a new method (row M1) and new records: **Minor**, nothing to acknowledge.
+  Compile gate against 3.8.0: required level MINOR. No existing element, id, access or default changes; no data migration; ranges
+  `System.Identity-[3.0.0,4.0)` stay satisfied. None of the NEXT MAJOR items is touched.
+- **Writes:** `Client` and `ClientMirror` keep `writeAccess` (3.6.0), so only the identity service writes the list (through the method)
+  and the tracking (through the mirror reconciliation); generic GraphQL writes are refused. Reads are generic, so `MirrorRoleNames` and the
+  tracking are readable like the other client and mirror attributes.
+- **Rollout:** service-managed, no catalog import, no FixAll. With the default empty list nothing changes.

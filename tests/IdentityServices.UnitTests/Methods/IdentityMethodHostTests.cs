@@ -58,6 +58,7 @@ public class IdentityMethodHostTests
             SystemIdentityCkIds.DataPolicySetEnforcementModeMethodId,
             SystemIdentityCkIds.ClientProvisionMirrorsMethodId, SystemIdentityCkIds.ClientProvisionMirrorInTenantMethodId,
             SystemIdentityCkIds.ClientRemoveMirrorMethodId, SystemIdentityCkIds.ClientSetMirrorAutoProvisionMethodId,
+            SystemIdentityCkIds.ClientSetMirrorRolesMethodId,
             SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminMethodId,
             SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminWithGroupsMethodId,
             SystemIdentityCkIds.ExternalTenantUserMappingProvisionCurrentUserMethodId,

@@ -1,11 +1,16 @@
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Authorization;
+using Meshmakers.Octo.Runtime.Contracts.DataPermissions;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
@@ -19,6 +24,15 @@ internal static class ClientMirrorMethodErrors
     public const string MirrorNotFound = "MIRROR_NOT_FOUND";
     public const string ClientSecretNotRequired = "CLIENT_SECRET_NOT_REQUIRED";
     public const string ConcurrentChange = "CONCURRENT_CHANGE";
+    public const string MirrorRoleNotAllowed = "MIRROR_ROLE_NOT_ALLOWED";
+    public const string ClientNotConfidential = "CLIENT_NOT_CONFIDENTIAL";
+    public const string MirrorRoleNotFound = "MIRROR_ROLE_NOT_FOUND";
+
+    /// <summary>Refusal reason: the target client is itself a mirror; only its original carries a role list.</summary>
+    public const string MirrorClientReason = "mirror-client";
+
+    /// <summary>The most role names one list may hold (a list is a handful of deployment roles, never a role catalogue).</summary>
+    public const int MaxMirrorRoleNames = 32;
 
     /// <summary>Audit detail and error parameter: the child tenant of the call.</summary>
     public const string ChildTenantIdDetail = "childTenantId";
@@ -420,5 +434,181 @@ internal sealed class ClientSetMirrorAutoProvisionHandler(IServiceProvider servi
         }
 
         return stored == null ? CkMethodOutcome.TargetNotFound() : CkMethodOutcome.Ok();
+    }
+}
+
+/// <summary>
+///     Handler of <c>System.Identity/Client.SetMirrorRoles-1</c> (System.Identity 3.9.0): sets the roles the mirrors
+///     of the client get in every child tenant and reconciles the tracked mirrors. No REST facade (methods only).
+/// </summary>
+/// <remarks>
+///     <para>
+///         <b>Caller.</b> Scope <c>octo_api</c> and <c>TenantManagement</c> - stricter than <c>Client.AddRole-1</c> (no
+///         <c>UserManagement</c>), because the effect reaches every child tenant, also future ones. The tenant of the call must
+///         lie in the caller's tenant subtree, the rule of every mirror method: a token of the original's tenant or of one of
+///         its ancestor tenants is admitted, a child tenant's administrator cannot set the parent's list. Anything else is
+///         <c>METHOD_FORBIDDEN</c>.
+///     </para>
+///     <para>
+///         <b>List.</b> Trimmed and distinct, at most <see cref="ClientMirrorMethodErrors.MaxMirrorRoleNames" /> names. A
+///         deny-listed role (<see cref="ClientMirrorRoleRules.DeniedRoleNames" />) is <c>MIRROR_ROLE_NOT_ALLOWED</c>; a non-empty
+///         list on a public client or one without <c>client_credentials</c> is <c>CLIENT_NOT_CONFIDENTIAL</c>; a mirror as
+///         target is <c>METHOD_FORBIDDEN</c> (<c>reason</c> = <c>mirror-client</c>). Every role the list adds must exist in the
+///         tenant of the original and be readable by the caller (<c>MIRROR_ROLE_NOT_FOUND</c>, fail-closed: a role that exists
+///         only in a child is judged by nobody), and runs the client grant rule of the role change guard: a built-in role the
+///         caller does not hold (<c>role-not-held</c>) and the caller's own client (<c>self-grant</c>) are refused. Each refusal
+///         stores and writes nothing. The reconciler backs this up in every child (<c>RoleRefused</c>).
+///     </para>
+///     <para>
+///         <b>Effect.</b> <see cref="IClientMirrorProvisioningService.SetMirrorRolesAsync" />; <c>dryRun</c> writes nothing and
+///         answers the same per-tenant plan. A mirror whose write failed is <c>Failed</c> in the result and retried by the
+///         periodic reconciliation. One <c>Identity.Method</c> event per call with <c>clientId</c>, <c>roleNames</c> and
+///         <c>dryRun</c>; never a secret.
+///     </para>
+/// </remarks>
+internal sealed class ClientSetMirrorRolesHandler(IServiceProvider services)
+    : ClientMirrorResultHandlerBase<ClientSetMirrorRolesParameters, ClientSetMirrorRolesResult>(services)
+{
+    protected override CkMethodFailure? Admit(CkMethodPrincipal? principal, string tenantId) =>
+        principal != null &&
+        principal.Scopes.Contains(CommonConstants.OctoApiFullAccess, StringComparer.Ordinal) &&
+        principal.Roles.Contains(CommonConstants.TenantManagementRole, StringComparer.OrdinalIgnoreCase)
+            ? null
+            : CkMethodOutcome.Forbidden("role-required").Failure;
+
+    protected override async Task<CkMethodOutcome<ClientSetMirrorRolesResult>> ApplyAsync(IdentityMethodCall call,
+        RtClient client, ClientSetMirrorRolesParameters parameters, string tenantId, CancellationToken cancellationToken)
+    {
+        var dryRun = parameters.DryRun ?? false;
+        if (parameters.RoleNames == null)
+        {
+            // Required: an omitted list must never read as "clear the list" (that removes the managed roles everywhere).
+            return CrossTenantMethodSupport.ValidationFailed("roleNames");
+        }
+
+        var names = ClientMirrorRoleRules.Normalize(parameters.RoleNames);
+        call.Details["roleNames"] = string.Join(",", names);
+        call.Details["dryRun"] = dryRun ? "true" : "false";
+
+        if (await CrossTenantMethodSupport.CheckTargetTenantAsync(call, SystemIdentityCkIds.ClientSetMirrorRolesMethodId,
+                tenantId).ConfigureAwait(false) is { } outOfScope)
+        {
+            return outOfScope;
+        }
+
+        if (!string.IsNullOrWhiteSpace(client.ProvisionedByParentTenantId))
+        {
+            call.Details["reason"] = ClientMirrorMethodErrors.MirrorClientReason;
+            return new CkMethodFailure(CkMethodErrorCodes.MethodForbidden,
+                new Dictionary<string, string> { ["reason"] = ClientMirrorMethodErrors.MirrorClientReason });
+        }
+
+        if (names.Count > ClientMirrorMethodErrors.MaxMirrorRoleNames)
+        {
+            return CrossTenantMethodSupport.ValidationFailed("roleNames");
+        }
+
+        var denied = names.Where(ClientMirrorRoleRules.IsDenied).ToList();
+        if (denied.Count > 0)
+        {
+            return new CkMethodFailure(ClientMirrorMethodErrors.MirrorRoleNotAllowed,
+                new Dictionary<string, string> { ["roleNames"] = string.Join(",", denied) });
+        }
+
+        if (names.Count > 0 && !ClientMirrorRoleRules.MayCarryMirrorRoles(client))
+        {
+            return new CkMethodFailure(ClientMirrorMethodErrors.ClientNotConfidential);
+        }
+
+        // The grant rule of the role change guard for every role the list adds: the caller must hold a built-in role it
+        // hands to the mirrors, and a client-credentials caller cannot extend its own client's list (its mirrors are itself).
+        var stored = new HashSet<string>(client.MirrorRoleNames ?? Enumerable.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
+        var added = names.Where(n => !stored.Contains(n)).ToList();
+        if (added.Count > 0)
+        {
+            // Fail-closed: the guard can judge only a role the tenant of the original knows. A name it cannot resolve (or the
+            // caller cannot read) would be judged by nobody and granted in every child that has a role of that name (an app
+            // role installed only in a child), so it is refused before anything is stored.
+            var unknown = await UnknownRoleNamesAsync(call, added, cancellationToken).ConfigureAwait(false);
+            if (unknown.Count > 0)
+            {
+                return new CkMethodFailure(ClientMirrorMethodErrors.MirrorRoleNotFound,
+                    new Dictionary<string, string> { ["roleNames"] = string.Join(",", unknown) });
+            }
+
+            var decision = await Services.GetRequiredService<IRoleChangeGuard>()
+                .EvaluateClientGrantAsync(call.Caller, client, added, cancellationToken).ConfigureAwait(false);
+            if (!decision.IsAllowed)
+            {
+                return call.Refuse(decision).Failure!;
+            }
+        }
+
+        ClientMirrorRolesResult? result;
+        try
+        {
+            // The list the guard judged against travels along: when another writer changed the stored list since, the
+            // write is refused, so a role the caller does not hold is never stored unchecked.
+            result = await MirrorService.SetMirrorRolesAsync(tenantId, client.ClientId!, names, dryRun,
+                cancellationToken, expectedStoredRoleNames: client.MirrorRoleNames?.ToList() ?? []).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is RtVersionConflictException or ClientMirrorRolesChangedException)
+        {
+            return new CkMethodFailure(ClientMirrorMethodErrors.ConcurrentChange);
+        }
+
+        if (result == null)
+        {
+            return CkMethodOutcome.TargetNotFound().Failure!;
+        }
+
+        call.Details["mirrors"] = result.Tenants.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        call.Details["failed"] = result.Tenants.Count(t => t.Outcome == MirrorRoleOutcome.Failed)
+            .ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var record = new RtClientMirrorRolesResultRecord
+        {
+            RoleNames = new AttributeStringValueList(result.RoleNames.ToList()),
+            DryRun = result.DryRun
+        };
+        foreach (var tenant in result.Tenants)
+        {
+            record.Tenants.Add(new RtClientMirrorRoleTenantResultRecord
+            {
+                ChildTenantId = tenant.ChildTenantId,
+                Outcome = tenant.Outcome.ToString(),
+                Added = new AttributeStringValueList(tenant.Added.ToList()),
+                Removed = new AttributeStringValueList(tenant.Removed.ToList()),
+                AlreadyPresent = new AttributeStringValueList(tenant.AlreadyPresent.ToList()),
+                Adopted = new AttributeStringValueList(tenant.Adopted.ToList()),
+                HandSet = new AttributeStringValueList(tenant.HandSet.ToList()),
+                RoleMissing = new AttributeStringValueList(tenant.RoleMissing.ToList()),
+                Declined = new AttributeStringValueList(tenant.Declined.ToList()),
+                RoleRefused = new AttributeStringValueList(tenant.RoleRefused.ToList())
+            });
+        }
+
+        return new ClientSetMirrorRolesResult { Value = record };
+    }
+
+    /// <summary>The names of <paramref name="names" /> with no role in the tenant of the call the caller may read.</summary>
+    private static async Task<List<string>> UnknownRoleNamesAsync(IdentityMethodCall call, IEnumerable<string> names,
+        CancellationToken cancellationToken)
+    {
+        var roleManager = call.Services.GetRequiredService<RoleManager<RtRole>>();
+        var unknown = new List<string>();
+        foreach (var name in names)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var role = await roleManager.FindByNameAsync(name).ConfigureAwait(false);
+            if (role == null || !(await call.EvaluateAsync(
+                    new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtRole>(), role.RtId), RtDataAction.Read,
+                    cancellationToken).ConfigureAwait(false)).IsAllowed)
+            {
+                unknown.Add(name);
+            }
+        }
+
+        return unknown;
     }
 }

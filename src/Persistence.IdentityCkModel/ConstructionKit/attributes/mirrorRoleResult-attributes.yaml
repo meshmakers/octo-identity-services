@@ -1,0 +1,57 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+# 3.9.0: members of the Client.SetMirrorRoles-1 result records (records/ck-clientMirrorRoleResults.yaml). They are
+# answers of a method call and are never stored on an entity or seeded, hence RuntimeState.
+attributes:
+  - id: MirrorRolesResultRoleNames
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: the role list of the original after the call (the requested list for a dry run)."
+  - id: MirrorRolesResultDryRun
+    valueType: Boolean
+    ownership: RuntimeState
+    description: "Method result member: true when nothing was written."
+  - id: MirrorRolesResultTenants
+    valueType: RecordArray
+    valueCkRecordId: ${this}/ClientMirrorRoleTenantResult
+    ownership: RuntimeState
+    description: "Method result member: one entry per tracked mirror of the client."
+  - id: MirrorRoleTenantChildTenantId
+    valueType: String
+    ownership: RuntimeState
+    description: "Method result member: the child tenant of the mirror."
+  - id: MirrorRoleTenantOutcome
+    valueType: String
+    ownership: RuntimeState
+    description: "Method result member: Applied, Planned (dry run), InSync, Skipped (no mirror of this parent there) or Failed (retried by the next reconciliation pass)."
+  - id: MirrorRoleTenantAdded
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: roles assigned to the mirror (dry run: that would be assigned)."
+  - id: MirrorRoleTenantRemoved
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: managed roles removed from the mirror because the list no longer names them."
+  - id: MirrorRoleTenantAlreadyPresent
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: listed roles the mirror holds already (adopted ones included)."
+  - id: MirrorRoleTenantAdopted
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: listed roles the mirror held by hand and that identity manages from now on."
+  - id: MirrorRoleTenantHandSet
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: roles of the mirror that the list does not name and identity does not manage; left alone."
+  - id: MirrorRoleTenantRoleMissing
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: listed roles that do not exist in the child tenant; assigned on the first pass after they exist."
+  - id: MirrorRoleTenantDeclined
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: listed roles a tenant administrator removed from the mirror; not assigned again."
+  - id: MirrorRoleTenantRoleRefused
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: listed roles the child tenant does not grant, because the tenant of the original has no role of that name or not the same built-in role; a managed one is removed."

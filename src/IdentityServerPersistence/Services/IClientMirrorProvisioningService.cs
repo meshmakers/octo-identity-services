@@ -92,6 +92,23 @@ public interface IClientMirrorProvisioningService
         string parentTenantId, string parentClientId);
 
     /// <summary>
+    /// stores <paramref name="roleNames" /> as <c>MirrorRoleNames</c> of the client (version-checked; trimmed,
+    /// distinct) and brings the roles of every tracked mirror in line with it: listed roles are added, listed roles a
+    /// mirror already holds are adopted, only managed roles the list no longer names are removed, hand-set roles stay and a
+    /// role the child tenant declined is not assigned again. <paramref name="dryRun" /> writes nothing anywhere and returns
+    /// the same plan. A failed mirror is reported as <c>Failed</c> and retried by the next reconciliation pass. Returns
+    /// <c>null</c> when the parent tenant or the client does not exist. The caller checks who may call it and which roles
+    /// may be listed (<see cref="ClientMirrorRoleRules" />); this method only drops denied names when it assigns.
+    /// </summary>
+    /// <param name="expectedStoredRoleNames">
+    ///     When given, the list the caller judged the new list against: the write is refused with
+    ///     <see cref="ClientMirrorRolesChangedException" /> when the stored list differs (another writer was in between).
+    /// </param>
+    Task<ClientMirrorRolesResult?> SetMirrorRolesAsync(string parentTenantId, string parentClientId,
+        IReadOnlyList<string> roleNames, bool dryRun, CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? expectedStoredRoleNames = null);
+
+    /// <summary>
     /// Lists the tracking rows recorded in the parent's DB for a given client.
     /// Returns an empty list when the client has no mirrors.
     /// </summary>
