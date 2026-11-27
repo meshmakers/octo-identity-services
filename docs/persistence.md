@@ -603,7 +603,7 @@ automatically, through `SecretManagementAdminGrant`
   role must exist, so this is deliberately not an `IMigration` — infrastructure migrations run before the
   blueprint). `SetupTenantAsync` runs for every tenant on identity startup and on tenant create/update
   (`PosCreateTenant`/`PosUpdateTenant`), so the first identity start with blueprint 1.7.0 grants it.
-- **Who** (`SecretManagementGrantPlanner`, pure and unit-tested): every **local user** who holds both
+- **Who** (`TenantAdministratorRoleGrantPlanner`, pure and unit-tested; the same rule and reader serve the FileManagement tenant-administrator grant, AB#6578): every **local user** who holds both
   `AdminPanelManagement` **and** `TenantManagement` (directly, via groups — `TenantOwners` included — or mixed) and
   does not hold `SecretManagement` yet gets a **direct** `AssignedRole` edge. Never granted:
   - **groups** — a role on a group is inherited by all members, including client service accounts

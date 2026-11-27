@@ -47,7 +47,7 @@ internal sealed record TenantAdministratorFileRoleGrantResult(
 /// <summary>
 ///     AB#6578: one-time, additive grant of <c>FileManagement</c> to the HUMAN administrators of a tenant — every
 ///     local user that holds both <c>AdminPanelManagement</c> and <c>TenantManagement</c>. No group, client,
-///     cross-tenant shadow user or external mapping receives it. See <see cref="TenantAdministratorFileRoleGrantPlanner"/>.
+///     cross-tenant shadow user or external mapping receives it. See <see cref="TenantAdministratorRoleGrantPlanner"/>.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -104,7 +104,7 @@ internal static class TenantAdministratorFileRoleGrant
         }
 
         var tenantRepository = tenantContext.GetTenantRepositoryAsAdmin();
-        TenantAdministratorFileRoleGrantPlan plan;
+        TenantAdministratorRoleGrantPlan plan;
         using (var session = await tenantRepository.GetSessionAsync())
         {
             var roles = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create());
@@ -131,8 +131,8 @@ internal static class TenantAdministratorFileRoleGrant
 
             // The read is not wrapped in a transaction (one association query per subject can outlast MongoDB's
             // transaction lifetime on large tenants); the planner skips users that already hold the role.
-            var input = await ReadRoleGraphAsync(tenantRepository, session);
-            plan = TenantAdministratorFileRoleGrantPlanner.Plan(
+            var input = await TenantAdministratorRoleGraphReader.ReadAsync(tenantRepository, session);
+            plan = TenantAdministratorRoleGrantPlanner.Plan(
                 input, adminPanelRoleId, tenantManagementRoleId, fileManagementRoleId.ToString());
 
             using var writeSession = await tenantRepository.GetSessionAsync();
@@ -193,55 +193,5 @@ internal static class TenantAdministratorFileRoleGrant
 
         return new TenantAdministratorFileRoleGrantResult(
             TenantAdministratorFileRoleGrantStatus.Completed, plan.UserIds);
-    }
-
-    private static async Task<TenantAdministratorFileRoleGrantInput> ReadRoleGraphAsync(
-        ITenantRepository tenantRepository, IOctoSession session)
-    {
-        var userCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtUser>();
-        var groupCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtGroup>();
-        var roleCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtRole>();
-
-        var userRoles = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
-        var excludedUsers = new HashSet<string>(StringComparer.Ordinal);
-        var users = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, RtEntityQueryOptions.Create());
-        foreach (var user in users.Items)
-        {
-            if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
-            {
-                // Provisioned parent-tenant administrator (AB#5708): not a local human administrator.
-                excludedUsers.Add(user.RtId.ToString());
-            }
-
-            userRoles[user.RtId.ToString()] =
-                await ReadTargetsAsync(user.ToRtEntityId(), IdentityAssociationConstants.AssignedRoleId, roleCkTypeId);
-        }
-
-        var groupRoles = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
-        var groupChildren = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
-        var groupMembers = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
-        var groups = await tenantRepository.GetRtEntitiesByTypeAsync<RtGroup>(session, RtEntityQueryOptions.Create());
-        foreach (var group in groups.Items)
-        {
-            var id = group.RtId.ToString();
-            var entityId = group.ToRtEntityId();
-            groupRoles[id] = await ReadTargetsAsync(entityId, IdentityAssociationConstants.AssignedRoleId, roleCkTypeId);
-            groupChildren[id] = await ReadTargetsAsync(entityId, IdentityAssociationConstants.ChildGroupId, groupCkTypeId);
-            groupMembers[id] = await ReadTargetsAsync(entityId, IdentityAssociationConstants.GroupMemberId, userCkTypeId);
-        }
-
-        return new TenantAdministratorFileRoleGrantInput(userRoles, groupRoles, groupChildren, groupMembers, excludedUsers);
-
-        async Task<IReadOnlySet<string>> ReadTargetsAsync(
-            RtEntityId origin, RtCkId<CkAssociationRoleId> associationRoleId, RtCkId<CkTypeId> targetCkTypeId)
-        {
-            var edges = await tenantRepository.GetRtAssociationsAsync(
-                session, origin,
-                RtAssociationExtendedQueryOptions.Create(GraphDirections.Outbound, roleId: associationRoleId));
-            return edges.Items
-                .Where(e => e.TargetCkTypeId == targetCkTypeId)
-                .Select(e => e.TargetRtId.ToString())
-                .ToHashSet(StringComparer.Ordinal);
-        }
     }
 }

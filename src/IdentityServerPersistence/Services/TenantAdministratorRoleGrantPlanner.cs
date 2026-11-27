@@ -1,7 +1,7 @@
-namespace IdentityServerPersistence.Services.FileRoles;
+namespace IdentityServerPersistence.Services;
 
 /// <summary>
-///     Role graph of one tenant as the <see cref="TenantAdministratorFileRoleGrantPlanner"/> sees it. All ids are
+///     Role graph of one tenant as the <see cref="TenantAdministratorRoleGrantPlanner"/> sees it. All ids are
 ///     rtId hex strings; role ids are the rtIds of <c>RtRole</c> entities.
 /// </summary>
 /// <param name="UserRoleIds">User rtId → role rtIds assigned directly (outbound <c>AssignedRole</c>).</param>
@@ -12,7 +12,7 @@ namespace IdentityServerPersistence.Services.FileRoles;
 ///     User rtIds that are never granted: cross-tenant shadow users (<c>xt_…</c>, provisioned parent-tenant
 ///     administrators, AB#5708). Optional; empty when omitted.
 /// </param>
-internal sealed record TenantAdministratorFileRoleGrantInput(
+internal sealed record TenantAdministratorRoleGraph(
     IReadOnlyDictionary<string, IReadOnlySet<string>> UserRoleIds,
     IReadOnlyDictionary<string, IReadOnlySet<string>> GroupRoleIds,
     IReadOnlyDictionary<string, IReadOnlySet<string>> GroupChildGroupIds,
@@ -20,31 +20,33 @@ internal sealed record TenantAdministratorFileRoleGrantInput(
     IReadOnlySet<string>? ExcludedUserIds = null);
 
 /// <summary>Users the planner decided on. Never contains a user that already holds the role.</summary>
-internal sealed record TenantAdministratorFileRoleGrantPlan(IReadOnlyList<string> UserIds);
+internal sealed record TenantAdministratorRoleGrantPlan(IReadOnlyList<string> UserIds);
 
 /// <summary>
-///     AB#6578: decides which existing users receive <c>FileManagement</c> because they administer the tenant.
-///     Pure function — no I/O — so the rule is unit-testable without a database.
+///     AB#6578 / AB#5544: decides which existing users receive a role (<c>FileManagement</c>,
+///     <c>SecretManagement</c>) because they administer the tenant. ONE rule for both one-time grants
+///     (<c>TenantAdministratorFileRoleGrant</c>, <c>SecretManagementAdminGrant</c>). Pure function — no I/O — so
+///     the rule is unit-testable without a database.
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Why: the one-time Reporting-based grant (<see cref="FileRoleGrantPlanner"/>) only reaches holders of the
-///         Reporting roles. A tenant without Reporting has no File-role holder, so its administrators see an empty
-///         file system (data permissions are fail-closed, read needs FileViewer or FileManagement) while the
-///         platform-services admin session still sees the default file root.
+///         Why FileManagement: the one-time Reporting-based grant (<see cref="FileRoles.FileRoleGrantPlanner"/>) only
+///         reaches holders of the Reporting roles; a tenant without Reporting has no File-role holder, so its
+///         administrators see an empty file system (AB#6578). Why SecretManagement: secret sweeps are a separate
+///         privilege for human administrators only (decision Gerald 2026-10-11, AB#5544).
 ///     </para>
 ///     <para>
-///         Rule (same discriminator and exclusions as the AB#5544 SecretManagement administrator grant): a local
+///         Rule: a local
 ///         <b>human</b> user that holds BOTH <c>AdminPanelManagement</c> and <c>TenantManagement</c> — direct, via
 ///         groups (including <c>TenantOwners</c>) or mixed — gets a <b>direct</b> <c>AssignedRole</c> edge. Holding
-///         only one of the two is not enough. A user that already holds <c>FileManagement</c> (directly or through a
+///         only one of the two is not enough. A user that already holds the target role (directly or through a
 ///         group) is skipped. Nothing is ever removed.
 ///     </para>
 ///     <para>
 ///         Why no group grant: a role on a group is inherited by every member, and members are not only users —
 ///         clients (service accounts) and external tenant user mappings (provisioned parent-tenant administrators,
 ///         AB#5708) inherit the same way. Subjects are therefore only <c>RtUser</c> entities, and cross-tenant shadow
-///         users (<c>xt_</c> prefix) are excluded via <see cref="TenantAdministratorFileRoleGrantInput.ExcludedUserIds"/>.
+///         users (<c>xt_</c> prefix) are excluded via <see cref="TenantAdministratorRoleGraph.ExcludedUserIds"/>.
 ///     </para>
 ///     <para>
 ///         Group semantics mirror <c>GroupRoleResolver</c>: the effective roles of a group are its own roles plus the
@@ -52,15 +54,15 @@ internal sealed record TenantAdministratorFileRoleGrantPlan(IReadOnlyList<string
 ///         roles plus the effective roles of every group the user is a direct member of.
 ///     </para>
 /// </remarks>
-internal static class TenantAdministratorFileRoleGrantPlanner
+internal static class TenantAdministratorRoleGrantPlanner
 {
     private const int MaxDepth = 10;
 
-    public static TenantAdministratorFileRoleGrantPlan Plan(
-        TenantAdministratorFileRoleGrantInput input,
+    public static TenantAdministratorRoleGrantPlan Plan(
+        TenantAdministratorRoleGraph input,
         string adminPanelManagementRoleId,
         string tenantManagementRoleId,
-        string fileManagementRoleId)
+        string targetRoleId)
     {
         var groupIds = input.GroupRoleIds.Keys
             .Concat(input.GroupChildGroupIds.Keys)
@@ -91,16 +93,16 @@ internal static class TenantAdministratorFileRoleGrantPlanner
             }
 
             if (roles.Contains(adminPanelManagementRoleId) && roles.Contains(tenantManagementRoleId)
-                && !roles.Contains(fileManagementRoleId))
+                && !roles.Contains(targetRoleId))
             {
                 grantedUsers.Add(userId);
             }
         }
 
-        return new TenantAdministratorFileRoleGrantPlan(grantedUsers);
+        return new TenantAdministratorRoleGrantPlan(grantedUsers);
     }
 
-    private static HashSet<string> EffectiveGroupRoles(TenantAdministratorFileRoleGrantInput input, string groupId)
+    private static HashSet<string> EffectiveGroupRoles(TenantAdministratorRoleGraph input, string groupId)
     {
         var roles = new HashSet<string>(StringComparer.Ordinal);
         Walk(input, groupId, new HashSet<string>(StringComparer.Ordinal), 0, roles);
@@ -108,7 +110,7 @@ internal static class TenantAdministratorFileRoleGrantPlanner
     }
 
     private static void Walk(
-        TenantAdministratorFileRoleGrantInput input, string groupId, HashSet<string> visited, int depth,
+        TenantAdministratorRoleGraph input, string groupId, HashSet<string> visited, int depth,
         HashSet<string> roles)
     {
         if (depth >= MaxDepth || !visited.Add(groupId))

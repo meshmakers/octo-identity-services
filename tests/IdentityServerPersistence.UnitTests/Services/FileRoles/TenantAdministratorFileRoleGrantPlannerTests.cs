@@ -1,5 +1,5 @@
 using FluentAssertions;
-using IdentityServerPersistence.Services.FileRoles;
+using IdentityServerPersistence.Services;
 using Xunit;
 
 namespace IdentityServerPersistence.UnitTests.Services.FileRoles;
@@ -8,7 +8,7 @@ namespace IdentityServerPersistence.UnitTests.Services.FileRoles;
 ///     AB#6578: the pure rule of the human-administrator File-role grant — users holding AdminPanelManagement AND
 ///     TenantManagement (direct, via groups, via TenantOwners) get a direct FileManagement edge; nobody else.
 /// </summary>
-public class TenantAdministratorFileRoleGrantPlannerTests
+public class TenantAdministratorRoleGrantPlannerTests
 {
     private const string AdminPanel = "660000000000000000000002";
     private const string TenantManagement = "660000000000000000000001";
@@ -149,7 +149,7 @@ public class TenantAdministratorFileRoleGrantPlannerTests
         // The grant passes "-" for an admin role that does not exist in the tenant.
         var input = Input(users: new() { ["u"] = [AdminPanel] });
 
-        TenantAdministratorFileRoleGrantPlanner
+        TenantAdministratorRoleGrantPlanner
             .Plan(input, AdminPanel, "-", FileManagement)
             .UserIds.Should().BeEmpty();
     }
@@ -161,10 +161,10 @@ public class TenantAdministratorFileRoleGrantPlannerTests
             .Should().NotBe(IdentityServiceConstants.FileRoleGrantKey);
     }
 
-    private static TenantAdministratorFileRoleGrantPlan Plan(TenantAdministratorFileRoleGrantInput input) =>
-        TenantAdministratorFileRoleGrantPlanner.Plan(input, AdminPanel, TenantManagement, FileManagement);
+    private static TenantAdministratorRoleGrantPlan Plan(TenantAdministratorRoleGraph input) =>
+        TenantAdministratorRoleGrantPlanner.Plan(input, AdminPanel, TenantManagement, FileManagement);
 
-    private static TenantAdministratorFileRoleGrantInput Input(
+    private static TenantAdministratorRoleGraph Input(
         Dictionary<string, string[]>? users = null,
         Dictionary<string, string[]>? groupRoles = null,
         Dictionary<string, string[]>? groupChildren = null,

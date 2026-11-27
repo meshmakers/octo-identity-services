@@ -1,5 +1,5 @@
 using FluentAssertions;
-using IdentityServerPersistence.Services.SecretManagement;
+using IdentityServerPersistence.Services;
 using Xunit;
 
 namespace IdentityServerPersistence.UnitTests.Services.SecretManagement;
@@ -10,7 +10,7 @@ namespace IdentityServerPersistence.UnitTests.Services.SecretManagement;
 ///     groups or mixed) gets a DIRECT edge; never a group (members include clients and provisioned parent-tenant
 ///     administrators), never a cross-tenant shadow user; AdminPanelManagement alone is not enough.
 /// </summary>
-public class SecretManagementGrantPlannerTests
+public class TenantAdministratorRoleGrantPlannerTests
 {
     private const string Apm = "role-apm";
     private const string Tm = "role-tm";
@@ -46,9 +46,9 @@ public class SecretManagementGrantPlannerTests
             return this;
         }
 
-        public SecretManagementGrantPlan Plan() =>
-            SecretManagementGrantPlanner.Plan(
-                new SecretManagementGrantInput(Users, GroupRoles, Children, Members, Excluded), Apm, Tm, Sm);
+        public TenantAdministratorRoleGrantPlan Plan() =>
+            TenantAdministratorRoleGrantPlanner.Plan(
+                new TenantAdministratorRoleGraph(Users, GroupRoles, Children, Members, Excluded), Apm, Tm, Sm);
     }
 
     [Fact]
@@ -160,8 +160,8 @@ public class SecretManagementGrantPlannerTests
     [Fact]
     public void UnknownAdminRoleIds_GrantNothing()
     {
-        var plan = SecretManagementGrantPlanner.Plan(
-            new SecretManagementGrantInput(
+        var plan = TenantAdministratorRoleGrantPlanner.Plan(
+            new TenantAdministratorRoleGraph(
                 new Dictionary<string, IReadOnlySet<string>> { ["u1"] = new HashSet<string> { Apm, Tm } },
                 new Dictionary<string, IReadOnlySet<string>>(),
                 new Dictionary<string, IReadOnlySet<string>>(),
