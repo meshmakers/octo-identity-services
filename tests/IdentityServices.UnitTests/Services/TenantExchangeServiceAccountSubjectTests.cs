@@ -104,7 +104,7 @@ public class TenantExchangeServiceAccountSubjectTests
     [InlineData(ServiceAccountExchangeRefusal.UnknownTenant, "unauthorized_client", "cross-tenant access")]
     [InlineData(ServiceAccountExchangeRefusal.SourceClientUnknown, "invalid_grant", "the subject service account")]
     [InlineData(ServiceAccountExchangeRefusal.AgentClient, "unauthorized_client", "an agent token")]
-    [InlineData(ServiceAccountExchangeRefusal.StateUnreadable, "access_denied", "the service-account exchange could not be checked")]
+    [InlineData(ServiceAccountExchangeRefusal.StateUnreadable, "temporarily_unavailable", "the service-account exchange could not be checked")]
     public async Task ServiceAccountSubject_RefusedByTheGate_MapsToAStableError_AndRaisesTheAudit(
         ServiceAccountExchangeRefusal refusal, string error, string descriptionPrefix)
     {

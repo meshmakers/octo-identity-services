@@ -44,6 +44,9 @@ public sealed class TokenExchangeServiceAccountHttpTests : IntegrationTestBase, 
     private readonly WebApplicationFactory<Program> _host;
     private RtClient? _admittedShadow;
 
+    /// <summary>When set, the gate refuses with this reason instead of admitting.</summary>
+    private ServiceAccountExchangeRefusal? _gateRefusal;
+
     public TokenExchangeServiceAccountHttpTests(CustomWebApplicationFactory factory) : base(factory)
     {
         _host = factory.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
@@ -116,6 +119,47 @@ public sealed class TokenExchangeServiceAccountHttpTests : IntegrationTestBase, 
         status.Should().Be(HttpStatusCode.BadRequest);
         body["error"]!.GetValue<string>().Should().Be("unauthorized_client",
             "OpenIddict refuses a client that is not permitted to use the token-exchange grant: {0}", body.ToJsonString());
+    }
+
+    // The gate could not read its own state: an outage, not a refusal of the target. The answer is
+    // temporarily_unavailable with HTTP 503, so a caller does not drop the target as refused.
+    [Fact]
+    public async Task GateStateUnreadable_IsTemporarilyUnavailable_WithHttp503()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeClientsAsync(shadowMayExchange: true);
+        var subjectToken = await RequestSourceTokenAsync(ct);
+        _gateRefusal = ServiceAccountExchangeRefusal.StateUnreadable;
+
+        var (status, body) = await ExchangeAsync(ShadowClientId, subjectToken, ct);
+
+        status.Should().Be(HttpStatusCode.ServiceUnavailable, "{0}", body.ToJsonString());
+        body["error"]!.GetValue<string>().Should().Be("temporarily_unavailable");
+        body["error_description"]!.GetValue<string>().Should()
+            .StartWith("the service-account exchange could not be checked");
+        body.ContainsKey("access_token").Should().BeFalse();
+    }
+
+    // Every real refusal of the target stays an OAuth refusal with HTTP 400.
+    [Theory]
+    [InlineData(ServiceAccountExchangeRefusal.NotProvisioned, "access_denied", "tenant_not_provisioned")]
+    [InlineData(ServiceAccountExchangeRefusal.NotPermitted, "access_denied", "grant_not_permitted")]
+    [InlineData(ServiceAccountExchangeRefusal.ShadowClientNotExchangeOnly, "access_denied", "shadow_client_invalid")]
+    [InlineData(ServiceAccountExchangeRefusal.MirroredClient, "access_denied", "mirrored_client")]
+    [InlineData(ServiceAccountExchangeRefusal.AmbiguousSubject, "access_denied", "ambiguous_subject")]
+    public async Task GateRefusal_StaysARefusal_WithHttp400(ServiceAccountExchangeRefusal refusal, string error,
+        string descriptionPrefix)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeClientsAsync(shadowMayExchange: true);
+        var subjectToken = await RequestSourceTokenAsync(ct);
+        _gateRefusal = refusal;
+
+        var (status, body) = await ExchangeAsync(ShadowClientId, subjectToken, ct);
+
+        status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
+        body["error"]!.GetValue<string>().Should().Be(error);
+        body["error_description"]!.GetValue<string>().Should().StartWith(descriptionPrefix);
     }
 
     // ---------- arrangement ----------
@@ -238,11 +282,16 @@ public sealed class TokenExchangeServiceAccountHttpTests : IntegrationTestBase, 
         return (response.StatusCode, JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!.AsObject());
     }
 
-    /// <summary>Admits the arranged shadow client with exactly <see cref="TargetRole" />.</summary>
+    /// <summary>
+    ///     Admits the arranged shadow client with exactly <see cref="TargetRole" />, or refuses with the reason a test
+    ///     set.
+    /// </summary>
     private sealed class AdmittingGate(TokenExchangeServiceAccountHttpTests test) : IServiceAccountExchangeGate
     {
         public Task<ServiceAccountExchangeDecision> EvaluateAsync(string sourceTenantId, string sourceClientId,
-            string targetTenantId) => Task.FromResult(new ServiceAccountExchangeDecision
+            string targetTenantId) => Task.FromResult(test._gateRefusal is { } refusal
+            ? ServiceAccountExchangeDecision.Refused(refusal, "scripted by the test")
+            : new ServiceAccountExchangeDecision
         {
             Refusal = ServiceAccountExchangeRefusal.None,
             Relation = ServiceAccountExchangeRelation.Parent,

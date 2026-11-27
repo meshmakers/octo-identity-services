@@ -251,6 +251,13 @@ public class TokenEndpointController(
             return await SignInServiceAccountExchangeAsync(request, outcome);
         }
 
+        if (outcome.Error == Errors.TemporarilyUnavailable)
+        {
+            // OpenIddict answers this error raised through Forbid with HTTP 400; an outage must be a 5xx so a caller
+            // does not take it for a refusal of the target tenant.
+            return TemporarilyUnavailable(outcome.ErrorDescription ?? "token exchange is temporarily unavailable");
+        }
+
         if (outcome.Error != null || outcome.ShadowUser == null)
         {
             return ForbidWithError(outcome.Error ?? Errors.InvalidGrant,
@@ -603,6 +610,24 @@ public class TokenEndpointController(
                 }
             }
         }
+    }
+
+    /// <summary>
+    ///     <c>temporarily_unavailable</c> with HTTP 503, <c>Retry-After</c> and <c>no-store</c>, in the OAuth error shape
+    ///     (like <c>TokenEndpointDatabaseFailureMiddleware</c>).
+    /// </summary>
+    private IActionResult TemporarilyUnavailable(string description)
+    {
+        Response.Headers.RetryAfter = "60";
+        Response.Headers.CacheControl = "no-store";
+        return new JsonResult(new Dictionary<string, string>
+        {
+            [Parameters.Error] = Errors.TemporarilyUnavailable,
+            [Parameters.ErrorDescription] = description
+        })
+        {
+            StatusCode = StatusCodes.Status503ServiceUnavailable
+        };
     }
 
     private IActionResult ForbidWithError(string error, string description) => Forbid(
