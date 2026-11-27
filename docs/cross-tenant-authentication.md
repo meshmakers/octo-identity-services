@@ -204,9 +204,10 @@ client. A mirror (`ProvisionedByParentTenantId`, `AutoProvisionInChildTenants`) 
   `Token Exchange Failure` audit event and, for a source T that is not a registry ancestor of U, the cross-tenant
   refusal event, like a user exchange. A request whose U is not wired into it (`invalid_target`) writes only the
   failure event; a missing or invalid subject token and a missing `acr_values` write none.
-- The refusals of the table answer HTTP 400. A gate that could not read its own state (the tenant registry or a
-  tenant database throws) answers `temporarily_unavailable` with HTTP 503, `Retry-After` and `no-store`, written by
-  `TokenEndpointController` (OpenIddict answers every token-endpoint error with 400): that is an outage, not a
+- The refusals of the table answer HTTP 400; `server_error` answers 5xx. A gate that could not read its own
+  state (the tenant registry or a tenant database throws) answers `temporarily_unavailable` with HTTP 503,
+  `Retry-After` and `no-store`, written by `TokenEndpointController` (an error raised through OpenIddict's `Forbid`
+  would answer 400): that is an outage, not a
   refusal of U, and a caller such as the mesh adapter's cross-tenant guard fails instead of treating U as refused (a
   consolidation with `onRefused: Report` would otherwise drop U silently). An allow-list of T that cannot be read is
   not part of this: `AllowListSourceTenantGrantPolicy` reads it as "not permitted" (`grant_not_permitted`, 400).

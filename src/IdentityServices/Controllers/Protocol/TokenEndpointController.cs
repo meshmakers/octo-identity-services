@@ -253,8 +253,8 @@ public class TokenEndpointController(
 
         if (outcome.Error == Errors.TemporarilyUnavailable)
         {
-            // OpenIddict answers every token-endpoint error with HTTP 400; an outage must be a 5xx so a caller does
-            // not take it for a refusal of the target tenant.
+            // OpenIddict answers this error raised through Forbid with HTTP 400; an outage must be a 5xx so a caller
+            // does not take it for a refusal of the target tenant.
             return TemporarilyUnavailable(outcome.ErrorDescription ?? "token exchange is temporarily unavailable");
         }
 
