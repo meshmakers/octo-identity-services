@@ -5,10 +5,11 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
-- AB#9854 Fix: a service-account token exchange whose gate cannot read its state (registry, allow-list or directory
-  unreadable) answers `temporarily_unavailable` with HTTP 503 instead of `access_denied` with HTTP 400. The mesh
+- AB#9854 Fix: a service-account token exchange whose gate cannot read its state (the tenant registry or a tenant
+  database throws) answers `temporarily_unavailable` with HTTP 503 instead of `access_denied` with HTTP 400. The mesh
   adapter's cross-tenant guard took the 400 for a refusal of the target, so a consolidation with `onRefused: Report`
-  dropped every company during an identity store outage and succeeded; it now fails. Every real refusal (not
+  dropped every company during an identity store outage and succeeded; it now fails. An allow-list that cannot be
+  read still counts as not permitted (`grant_not_permitted`, 400). Every real refusal (not
   provisioned, not permitted, shadow client invalid, mirrored client, ambiguous subject) stays `access_denied` with
   HTTP 400.
 - AB#9729 New: agent token exchange. An agent's service-account client gets the new API scope `octo_agent`
