@@ -9,6 +9,8 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Authorization;
+using Meshmakers.Octo.Runtime.Contracts.DataPermissions;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
@@ -24,6 +26,7 @@ internal static class ClientMirrorMethodErrors
     public const string ConcurrentChange = "CONCURRENT_CHANGE";
     public const string MirrorRoleNotAllowed = "MIRROR_ROLE_NOT_ALLOWED";
     public const string ClientNotConfidential = "CLIENT_NOT_CONFIDENTIAL";
+    public const string MirrorRoleNotFound = "MIRROR_ROLE_NOT_FOUND";
 
     /// <summary>Refusal reason: the target client is itself a mirror; only its original carries a role list.</summary>
     public const string MirrorClientReason = "mirror-client";
@@ -440,18 +443,21 @@ internal sealed class ClientSetMirrorAutoProvisionHandler(IServiceProvider servi
 /// </summary>
 /// <remarks>
 ///     <para>
-///         <b>Caller.</b> Scope <c>octo_api</c> and <c>TenantManagement</c> in the tenant of the original - stricter than
-///         <c>Client.AddRole-1</c> (no <c>UserManagement</c>), because the effect reaches every child tenant, also future ones.
-///         The tenant of the call must lie in the caller's tenant subtree (a child tenant's administrator cannot set the
-///         parent's list). Anything else is <c>METHOD_FORBIDDEN</c>.
+///         <b>Caller.</b> Scope <c>octo_api</c> and <c>TenantManagement</c> - stricter than <c>Client.AddRole-1</c> (no
+///         <c>UserManagement</c>), because the effect reaches every child tenant, also future ones. The tenant of the call must
+///         lie in the caller's tenant subtree, the rule of every mirror method: a token of the original's tenant or of one of
+///         its ancestor tenants is admitted, a child tenant's administrator cannot set the parent's list. Anything else is
+///         <c>METHOD_FORBIDDEN</c>.
 ///     </para>
 ///     <para>
 ///         <b>List.</b> Trimmed and distinct, at most <see cref="ClientMirrorMethodErrors.MaxMirrorRoleNames" /> names. A
 ///         deny-listed role (<see cref="ClientMirrorRoleRules.DeniedRoleNames" />) is <c>MIRROR_ROLE_NOT_ALLOWED</c>; a non-empty
 ///         list on a public client or one without <c>client_credentials</c> is <c>CLIENT_NOT_CONFIDENTIAL</c>; a mirror as
-///         target is <c>METHOD_FORBIDDEN</c> (<c>reason</c> = <c>mirror-client</c>). Every role the list adds runs the client
-///         grant rule of the role change guard: a built-in role the caller does not hold (<c>role-not-held</c>) and the
-///         caller's own client (<c>self-grant</c>) are refused. Each refusal stores and writes nothing.
+///         target is <c>METHOD_FORBIDDEN</c> (<c>reason</c> = <c>mirror-client</c>). Every role the list adds must exist in the
+///         tenant of the original and be readable by the caller (<c>MIRROR_ROLE_NOT_FOUND</c>, fail-closed: a role that exists
+///         only in a child is judged by nobody), and runs the client grant rule of the role change guard: a built-in role the
+///         caller does not hold (<c>role-not-held</c>) and the caller's own client (<c>self-grant</c>) are refused. Each refusal
+///         stores and writes nothing. The reconciler backs this up in every child (<c>RoleRefused</c>).
 ///     </para>
 ///     <para>
 ///         <b>Effect.</b> <see cref="IClientMirrorProvisioningService.SetMirrorRolesAsync" />; <c>dryRun</c> writes nothing and
@@ -521,6 +527,16 @@ internal sealed class ClientSetMirrorRolesHandler(IServiceProvider services)
         var added = names.Where(n => !stored.Contains(n)).ToList();
         if (added.Count > 0)
         {
+            // Fail-closed: the guard can judge only a role the tenant of the original knows. A name it cannot resolve (or the
+            // caller cannot read) would be judged by nobody and granted in every child that has a role of that name (an app
+            // role installed only in a child), so it is refused before anything is stored.
+            var unknown = await UnknownRoleNamesAsync(call, added, cancellationToken).ConfigureAwait(false);
+            if (unknown.Count > 0)
+            {
+                return new CkMethodFailure(ClientMirrorMethodErrors.MirrorRoleNotFound,
+                    new Dictionary<string, string> { ["roleNames"] = string.Join(",", unknown) });
+            }
+
             var decision = await Services.GetRequiredService<IRoleChangeGuard>()
                 .EvaluateClientGrantAsync(call.Caller, client, added, cancellationToken).ConfigureAwait(false);
             if (!decision.IsAllowed)
@@ -567,10 +583,32 @@ internal sealed class ClientSetMirrorRolesHandler(IServiceProvider services)
                 Adopted = new AttributeStringValueList(tenant.Adopted.ToList()),
                 HandSet = new AttributeStringValueList(tenant.HandSet.ToList()),
                 RoleMissing = new AttributeStringValueList(tenant.RoleMissing.ToList()),
-                Declined = new AttributeStringValueList(tenant.Declined.ToList())
+                Declined = new AttributeStringValueList(tenant.Declined.ToList()),
+                RoleRefused = new AttributeStringValueList(tenant.RoleRefused.ToList())
             });
         }
 
         return new ClientSetMirrorRolesResult { Value = record };
+    }
+
+    /// <summary>The names of <paramref name="names" /> with no role in the tenant of the call the caller may read.</summary>
+    private static async Task<List<string>> UnknownRoleNamesAsync(IdentityMethodCall call, IEnumerable<string> names,
+        CancellationToken cancellationToken)
+    {
+        var roleManager = call.Services.GetRequiredService<RoleManager<RtRole>>();
+        var unknown = new List<string>();
+        foreach (var name in names)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var role = await roleManager.FindByNameAsync(name).ConfigureAwait(false);
+            if (role == null || !(await call.EvaluateAsync(
+                    new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtRole>(), role.RtId), RtDataAction.Read,
+                    cancellationToken).ConfigureAwait(false)).IsAllowed)
+            {
+                unknown.Add(name);
+            }
+        }
+
+        return unknown;
     }
 }

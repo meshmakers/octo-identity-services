@@ -165,6 +165,52 @@ public class ClientSetMirrorRolesMethodTests : IntegrationTestBase, IDisposable
         (await StoredListAsync(client.ClientId)).Should().BeEmpty();
     }
 
+    /// <summary>
+    ///     Fail-closed: the guard judges the caller in the tenant of the original only, so a role that exists only in a
+    ///     child (an app installed there) must never reach the list: nobody could have judged whether the caller holds it.
+    /// </summary>
+    [Fact]
+    public async Task RoleThatExistsOnlyInAChild_IsRefused_MirrorRoleNotFound_AndTheChildGetsNothing()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateClientAsync();
+        var child = await CreateChildTenantAsync();
+        var childOnly = $"MirrorChildApp{Guid.NewGuid():N}"[..24];
+        await InsertRoleAsync(child, childOnly, wellKnownName: childOnly);
+
+        var outcome = await SetAsync(client, [Deploy, childOnly], Admin(Deploy), ct);
+
+        outcome.IsSuccess.Should().BeFalse("nobody could judge whether the caller holds a role of the child only");
+        outcome.Failure!.Code.Should().Be("MIRROR_ROLE_NOT_FOUND");
+        outcome.Failure.Parameters!["roleNames"].Should().Be(childOnly);
+        (await StoredListAsync(client.ClientId)).Should().BeEmpty();
+        (await MirrorRoleNamesAsync(child, client.ClientId)).Should().BeEmpty();
+        _audit.For(client.RtId.ToString()).Should().ContainSingle().Which.Outcome.Should().Be("MIRROR_ROLE_NOT_FOUND");
+    }
+
+    /// <summary>
+    ///     A custom role of the original's tenant passes the guard (custom roles are free), but the child's role of that name
+    ///     is a built-in role the caller was never judged for: the child does not grant it.
+    /// </summary>
+    [Fact]
+    public async Task CustomRoleInTheOriginalsTenant_DoesNotUnlockABuiltInRoleOfTheSameNameInAChild()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateClientAsync();
+        var child = await CreateChildTenantAsync();
+        var shared = $"MirrorShared{Guid.NewGuid():N}"[..24];
+        await InsertRoleAsync(NormalizedSystemTenantId, shared, wellKnownName: null);
+        await InsertRoleAsync(child, shared, wellKnownName: shared);
+
+        var outcome = await SetAsync(client, [shared], Admin(), ct);
+
+        outcome.IsSuccess.Should().BeTrue(outcome.Failure?.Code);
+        var tenant = outcome.Value!.Value!.Tenants.Single(t => t.ChildTenantId == child);
+        tenant.RoleRefused.Should().Equal(shared);
+        tenant.Added.Should().BeEmpty();
+        (await MirrorRoleNamesAsync(child, client.ClientId)).Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ClientExtendingItsOwnList_IsRefused_SelfGrant()
     {
@@ -316,7 +362,7 @@ public class ClientSetMirrorRolesMethodTests : IntegrationTestBase, IDisposable
     {
         using var scope = _host.Services.CreateScope();
         await EnsureApiScopeAsync(await RepositoryAsync(NormalizedSystemTenantId));
-        var builder = new RtClientBuilder().WithClientId($"m9923-{Guid.NewGuid():N}")
+        var builder = new RtClientBuilder().WithClientId($"mrm-{Guid.NewGuid():N}")
             .WithGrantTypes("client_credentials").WithScopes(ApiScope).RequireClientSecret().RequirePkce(false)
             .WithAutoProvisionInChildTenants();
         configure?.Invoke(builder);
@@ -385,6 +431,19 @@ public class ClientSetMirrorRolesMethodTests : IntegrationTestBase, IDisposable
                 RtId = OctoObjectId.GenerateNewId(), Name = name, NormalizedName = name.ToUpperInvariant()
             });
         }
+    }
+
+    private async Task InsertRoleAsync(string tenantId, string name, string? wellKnownName)
+    {
+        var repo = await RepositoryAsync(tenantId);
+        using var session = await repo.GetSessionAsync();
+        await repo.InsertOneRtEntityAsync(session, new RtRole
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            Name = name,
+            NormalizedName = name.ToUpperInvariant(),
+            RtWellKnownName = wellKnownName
+        });
     }
 
     private async Task WaitUntilRegistryKnowsAsync(string tenantId)

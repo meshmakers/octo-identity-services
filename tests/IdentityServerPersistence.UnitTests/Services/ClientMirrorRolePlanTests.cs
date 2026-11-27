@@ -198,6 +198,55 @@ public class ClientMirrorRolePlanTests
         plan.Add.Should().Equal("CommunicationManagement");
     }
 
+    [Fact]
+    public void RoleOnlyTheChildKnows_IsRefused_EvenWhenItIsCustomThere()
+    {
+        var refused = ClientMirrorRoleRules.RefusedInChild(["ChildOnlyAppRole", "ChildOnlyCustomRole"],
+            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { ["CommunicationManagement"] = "CommunicationManagement" },
+            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ChildOnlyAppRole"] = "ChildOnlyAppRole", ["ChildOnlyCustomRole"] = null
+            });
+
+        refused.Should().Equal("ChildOnlyAppRole", "ChildOnlyCustomRole");
+    }
+
+    [Fact]
+    public void BuiltInRoleOfTheChild_IsRefused_WhenTheOriginalsTenantKnowsTheNameOnlyAsACustomOrAnotherBuiltInRole()
+    {
+        var parent = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AppOperator"] = null, ["Renamed"] = "OtherWellKnown", ["CommunicationManagement"] = "CommunicationManagement",
+            ["Custom"] = null, ["PlatformInParent"] = "PlatformInParent"
+        };
+        var child = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AppOperator"] = "AppOperator", ["Renamed"] = "Renamed", ["communicationmanagement"] = "COMMUNICATIONMANAGEMENT",
+            ["Custom"] = null, ["PlatformInParent"] = null
+        };
+
+        var refused = ClientMirrorRoleRules.RefusedInChild(
+            ["AppOperator", "Renamed", "CommunicationManagement", "Custom", "PlatformInParent", "MissingInChild"], parent,
+            child);
+
+        refused.Should().Equal(["AppOperator", "Renamed", "MissingInChild"],
+            "the same built-in role (case-insensitive) and custom roles of the child pass; a name the original's tenant lacks never does");
+    }
+
+    [Fact]
+    public void RefusedName_IsNeitherAdded_NorKeptWhenManaged_AndIsReported()
+    {
+        var plan = MirrorRolePlan.Compute(["CommunicationManagement", "DashboardViewer"], ChildRoles,
+            current: ["DashboardViewer"], managed: ["DashboardViewer"], declined: [], sameMirror: true,
+            refused: ["communicationmanagement", "DashboardViewer"]);
+
+        plan.Add.Should().BeEmpty();
+        plan.Remove.Should().Equal(["DashboardViewer"], "a managed role the child must not grant is taken away");
+        plan.RoleRefused.Should().Equal("CommunicationManagement", "DashboardViewer");
+        plan.NewlyDeclined.Should().BeEmpty();
+        plan.Managed.Should().BeEmpty();
+    }
+
     private static MirrorRolePlan Plan(IReadOnlyList<string> desired, IReadOnlyList<string> current,
         IReadOnlyList<string>? managed, IReadOnlyList<string>? declined, bool sameMirror) =>
         MirrorRolePlan.Compute(desired, ChildRoles, current, managed, declined, sameMirror);

@@ -283,8 +283,16 @@ made or adopted on that mirror), `DeclinedRoleNames` (listed roles the child ten
 `ManagedMirrorRtId` (the mirror both lists refer to). Set with `Client.SetMirrorRoles-1` (`roleNames`, `dryRun`; rules and errors
 in `docs/identity-methods.md`). `CreateMirrorClient` never copies the list: a mirror is never a source.
 
-**Who may set it.** Scope `octo_api` and `TenantManagement` in the tenant of the original; the caller must hold every built-in role
-it adds (role change guard) and a client cannot extend its own list. **Deny-list:** `TenantManagement`, `UserManagement`,
+**Who may set it.** Scope `octo_api` and `TenantManagement` with a token of the tenant of the original or of one of its ancestor
+tenants (the tenant subtree rule of every mirror method; a child tenant's administrator cannot set a parent's list); the caller must
+hold every built-in role it adds (role change guard) and a client cannot extend its own list. **Names count as the original's
+tenant knows them (fail-closed).** The guard can judge the caller only in the tenant of the original, so every name the list adds
+must be a role there that the caller can read (`MIRROR_ROLE_NOT_FOUND` otherwise): a role that exists only in a child tenant (an
+app installed only there) cannot be listed. In each child the reconciliation grants a listed name only when the original's tenant
+has a role of that name and, if the child's role is a built-in role (it has an `rtWellKnownName`), the original's role is the same
+built-in role; otherwise the name is reported as `roleRefused`, not granted (WARN), and a managed assignment of it is removed. A
+custom role in the original's tenant therefore never unlocks a built-in role of the same name in a child. To mirror an app role,
+install the app (its role) in the original's tenant as well and hold the role. **Deny-list:** `TenantManagement`, `UserManagement`,
 `SecretManagement`, `AdminPanelManagement` and `AiBudgetAdmin` are never mirrored (`MIRROR_ROLE_NOT_ALLOWED`); the reconciliation
 drops them too, should a list ever reach the store another way. **Only confidential client-credentials clients**
 (`RequireClientSecret` and grant `client_credentials`): a public client (Studio, octo-cli) never gets roles through its mirrors,
@@ -302,6 +310,7 @@ rotation does not touch roles.
 | Case | What identity does |
 |---|---|
 | Listed role, not on the mirror | assigns it, records it as managed |
+| Listed name the original's tenant has no role of, or a built-in role of the child that is not the same built-in role there | not assigned, reported as `roleRefused` (WARN); a managed assignment is removed |
 | Listed role the mirror holds already (e.g. a hand grant made before the list existed) | **adopts** it: managed from now on, no second edge |
 | Managed role the list no longer names (also: list cleared) | removes it |
 | Role on the mirror the list does not name and identity does not manage | leaves it alone, reports it as `handSet` |
@@ -312,7 +321,8 @@ rotation does not touch roles.
 
 **Only tracked mirrors.** A role goes only to the child's client that carries this parent's mirror marker and has a tracking row of
 this parent. A client of the same id without them - a stray copy restored from another cluster's dump, or the child's
-own client - never gets a role.
+own client - never gets a role, also when a tracking row of this parent exists for that child (the client then carries another
+parent's marker or none).
 
 **Tenant owner (customer tenants).** No consent up front (decided by the platform owner: a parent administrator may already grant the
 same role by hand); the tenant keeps the last word through the decline rule above. Every grant, removal, adoption and decline is an
@@ -321,8 +331,11 @@ creator grant), with client id, tenant ids and role names only.
 
 **Failures.** A failed write is logged as ERROR (client id, tenant, never a secret) and never fails a tenant setup, a provisioning
 call or a reconciliation pass; the next pass retries it. The role edges are written before the tracking row, and the row with the
-version it was read with: an edge whose row write failed is adopted by the next pass, a removed edge whose row write failed is
-forgotten by it. Concurrent passes of two replicas: the second row write fails on the version, the next pass converges.
+version it was read with. When that write loses to a concurrent bump of the row (a secret rotation, a sync or a pass on another
+replica), the row is read again and this pass's change is merged into it once (three-way per list: a name stays when both sides
+keep it and is taken when either side added it), so a role identity just added is recorded as managed and clearing the list removes
+it. Should the merge write fail as well, or the row write fail for another reason, the next pass converges: an edge whose row write
+failed is adopted while it is still listed, a removed edge is forgotten.
 
 **Changing or clearing the list** reconciles every tracked mirror at once: added roles are assigned, removed roles are taken away
 only where identity manages them (adopted hand grants count as managed), hand-set roles stay and are listed. Switching
@@ -344,6 +357,8 @@ grants with a dry-run table per cluster in a later step.
 
 Tests: `ClientMirrorRolePlanTests` (rules and plan), `ClientMirrorRolesIntegrationTests` (real MongoDB: new child, nested grandchild
 through the tenant setup, missing role, list change with a hand-set role, adoption and clearing, dry run, declined and re-created
-mirror, stray copy, public client, failing write retried, rotation and no secret in the rendered log) and
-`ClientSetMirrorRolesMethodTests` (real host: caller rule, deny-list, public client, role not held, self-grant, child administrator,
-mirror as target, dry run, audit, and real client-credentials tokens per tenant through the method authorization).
+mirror, stray copy (untracked, and tracked without this parent's marker), child-only and same-name built-in roles refused, row
+write losing to a concurrent bump, public client, failing write retried, rotation and no secret in the rendered log) and
+`ClientSetMirrorRolesMethodTests` (real host: caller rule, deny-list, public client, role not held, a role that exists only in a
+child (`MIRROR_ROLE_NOT_FOUND`), a custom role of the original's tenant against a built-in role of a child, self-grant, child
+administrator, mirror as target, dry run, audit, and real client-credentials tokens per tenant through the method authorization).

@@ -113,6 +113,7 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
         var (system, service) = await InitializeAsync();
         var clientId = NewClientId("miss");
         const string custom = "MirrorRolesCustomRole";
+        await InsertRolesAsync(system, system.TenantId, custom);
         await CreateConfidentialClientAsync(system, clientId);
         await service.SetMirrorRolesAsync(system.TenantId, clientId, [custom, Deploy], dryRun: false, Ct);
         var child = await CreateChildAsync(system);
@@ -265,10 +266,29 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
     }
 
     [Fact]
-    public async Task UntrackedCopyWithTheSameClientId_GetsNoRoles()
+    public async Task TrackedRow_ButTheChildClientLacksThisParentsMarker_GetsNoRoles()
     {
         var (system, service) = await InitializeAsync();
         var clientId = NewClientId("stray");
+        await CreateConfidentialClientAsync(system, clientId);
+        var child = await CreateChildAsync(system);
+        await service.ProvisionForChildTenantAsync(system.TenantId, child);
+        (await TrackingRowAsync(system, clientId, child)).Should().NotBeNull("the pair is tracked");
+        // The child's client of that id now carries another parent's marker (a copy restored from another cluster's dump
+        // over the mirror): the row of this parent exists, the client is not its mirror.
+        await SetMarkerAsync(system, child, clientId, "another-parent");
+
+        var result = await service.SetMirrorRolesAsync(system.TenantId, clientId, [Deploy], dryRun: false, Ct);
+
+        result!.Tenants.Single(t => t.ChildTenantId == child).Outcome.Should().Be(MirrorRoleOutcome.Skipped);
+        (await MirrorRolesAsync(system, child, clientId)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UntrackedCopyWithTheSameClientId_GetsNoRoles()
+    {
+        var (system, service) = await InitializeAsync();
+        var clientId = NewClientId("untr");
         await CreateConfidentialClientAsync(system, clientId, autoProvision: false);
         await service.SetMirrorRolesAsync(system.TenantId, clientId, [Deploy], dryRun: false, Ct);
         var child = await CreateChildAsync(system);
@@ -281,6 +301,63 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
 
         (await MirrorRolesAsync(system, child, clientId)).Should().BeEmpty();
         result!.Tenants.Should().NotContain(t => t.ChildTenantId == child);
+    }
+
+    [Fact]
+    public async Task RoleTheOriginalsTenantDoesNotKnowAsTheSameBuiltInRole_IsNeverGrantedInTheChild()
+    {
+        var (system, service) = await InitializeAsync();
+        var clientId = NewClientId("refu");
+        const string app = "MirrorRolesChildApp";
+        const string onlyChild = "MirrorRolesOnlyChild";
+        await InsertRolesAsync(system, system.TenantId, app); // a custom role of the same name in the original's tenant
+        await CreateConfidentialClientAsync(system, clientId);
+        var child = await CreateChildAsync(system);
+        await InsertRoleAsync(system, child, app, wellKnownName: app); // an app role installed only in the child
+        await InsertRoleAsync(system, child, onlyChild, wellKnownName: null);
+        await service.ProvisionForChildTenantAsync(system.TenantId, child);
+
+        // A list that reached the store without the method (a restored database, an older writer).
+        var result = await service.SetMirrorRolesAsync(system.TenantId, clientId, [app, onlyChild, Deploy], dryRun: false,
+            Ct);
+
+        var tenant = result!.Tenants.Single(t => t.ChildTenantId == child);
+        tenant.RoleRefused.Should().Equal(app, onlyChild);
+        tenant.Added.Should().Equal(Deploy);
+        (await MirrorRolesAsync(system, child, clientId)).Should().BeEquivalentTo(Deploy);
+        _log.Messages.Should().Contain(m => m.Level == LogLevel.Warning && m.Text.Contains(app) &&
+                                            m.Text.Contains("not granted"));
+    }
+
+    [Fact]
+    public async Task RowWriteLosingToAConcurrentBump_StillRecordsTheAddedRoleAsManaged_SoClearingTheListRemovesIt()
+    {
+        var (system, service) = await InitializeAsync();
+        var clientId = NewClientId("race");
+        await CreateConfidentialClientAsync(system, clientId);
+        var child = await CreateChildAsync(system);
+        await service.ProvisionForChildTenantAsync(system.TenantId, child);
+        var bumped = 0;
+        service.Roles.BeforeRowWriteForTests = async (id, _) =>
+        {
+            // Another writer (a rotation, a sync on another replica) bumps the row between its read and this write.
+            if (id == clientId && Interlocked.Exchange(ref bumped, 1) == 0)
+            {
+                await BumpTrackingRowAsync(system, clientId, child);
+            }
+        };
+
+        await service.SetMirrorRolesAsync(system.TenantId, clientId, [Deploy], dryRun: false, Ct);
+        service.Roles.BeforeRowWriteForTests = null;
+
+        bumped.Should().Be(1, "the concurrent bump ran");
+        (await MirrorRolesAsync(system, child, clientId)).Should().BeEquivalentTo(Deploy);
+        (await TrackingRowAsync(system, clientId, child))!.ManagedRoleNames.Should().BeEquivalentTo([Deploy],
+            "the row is read again and merged once");
+
+        await service.SetMirrorRolesAsync(system.TenantId, clientId, [], dryRun: false, Ct);
+
+        (await MirrorRolesAsync(system, child, clientId)).Should().BeEmpty("the role identity added is managed, not hand-set");
     }
 
     [Fact]
@@ -351,6 +428,8 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
         await _fixture.InitializeAsync();
         var system = _fixture.GetSystemContext();
         await _fixture.GetService<IDefaultConfigurationCreatorService>().SetupAsync(system.TenantId);
+        // The names of a list count only as roles the tenant of the original knows (fail-closed).
+        await InsertRolesAsync(system, system.TenantId, SeedRoles);
         var service = new ClientMirrorProvisioningService(new TypedLogger(_log), system,
             Substitute.For<ITenantDiscoveryService>(), eventRepository: _events);
         return (system, service);
@@ -360,7 +439,7 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
 
     private async Task<string> CreateChildAsync(ISystemContext system)
     {
-        var tenantId = $"mr9923-{Guid.NewGuid():N}"[..22];
+        var tenantId = $"mrc-{Guid.NewGuid():N}"[..22];
         using (var session = await system.GetAdminSessionAsync())
         {
             session.StartTransaction();
@@ -374,7 +453,7 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
 
     private async Task<string> CreateGrandchildAsync(ISystemContext system, string parentId)
     {
-        var tenantId = $"mr9923g-{Guid.NewGuid():N}"[..22];
+        var tenantId = $"mrg-{Guid.NewGuid():N}"[..22];
         var parentContext = await system.GetChildTenantContextAsync(parentId);
         using (var session = await parentContext.GetAdminSessionAsync())
         {
@@ -414,6 +493,36 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
                 NormalizedName = name.ToUpperInvariant()
             });
         }
+    }
+
+    private static async Task InsertRoleAsync(ISystemContext system, string tenantId, string name, string? wellKnownName)
+    {
+        var repo = (await system.TryFindTenantRepositoryAsync(tenantId))!;
+        using var session = await repo.GetSessionAsync();
+        await repo.InsertOneRtEntityAsync(session, new RtRole
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            Name = name,
+            NormalizedName = name.ToUpperInvariant(),
+            RtWellKnownName = wellKnownName
+        });
+    }
+
+    private static async Task SetMarkerAsync(ISystemContext system, string tenantId, string clientId, string marker)
+    {
+        var repo = (await system.TryFindTenantRepositoryAsync(tenantId))!;
+        var mirror = (await MirrorAsync(system, tenantId, clientId))!;
+        mirror.ProvisionedByParentTenantId = marker;
+        using var session = await repo.GetSessionAsync();
+        await repo.ReplaceOneRtEntityByIdAsync(session, mirror.RtId, mirror, mirror.RtVersion);
+    }
+
+    private static async Task BumpTrackingRowAsync(ISystemContext system, string clientId, string childId)
+    {
+        var row = (await TrackingRowAsync(system, clientId, childId))!;
+        var repo = system.GetSystemTenantRepositoryAsAdmin();
+        using var session = await repo.GetSessionAsync();
+        await repo.ReplaceOneRtEntityByIdAsync(session, row.RtId, row, row.RtVersion);
     }
 
     private static async Task CreateConfidentialClientAsync(ISystemContext system, string clientId,

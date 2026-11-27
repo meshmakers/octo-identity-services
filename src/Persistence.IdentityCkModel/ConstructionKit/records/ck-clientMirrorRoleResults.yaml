@@ -34,3 +34,5 @@ records:
         name: RoleMissing
       - id: ${this}/MirrorRoleTenantDeclined
         name: Declined
+      - id: ${this}/MirrorRoleTenantRoleRefused
+        name: RoleRefused

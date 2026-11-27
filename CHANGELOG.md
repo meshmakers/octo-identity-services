@@ -47,7 +47,9 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   client carries `MirrorRoleNames`; identity assigns exactly these roles to every tracked mirror in every child tenant (nested and
   new tenants included) after each mirror convergence (tenant setup, `ReRunTenantSetup`, `Client.ProvisionMirrorInTenant-1`,
   `Client.ProvisionMirrors-1`, update of the original, the periodic reconciliation), idempotently. New method
-  `Client.SetMirrorRoles-1` (`roleNames`, `dryRun`): `TenantManagement` in the tenant of the original only; `TenantManagement`,
+  `Client.SetMirrorRoles-1` (`roleNames`, `dryRun`): `TenantManagement` with a token of the original's tenant or one of its ancestors;
+  every added name must be a role of the original's tenant (`MIRROR_ROLE_NOT_FOUND`; a child-only role is never listed, and a child
+  grants a name only as the same role the original's tenant knows, else `roleRefused`); `TenantManagement`,
   `UserManagement`, `SecretManagement`, `AdminPanelManagement` and `AiBudgetAdmin` are never mirrored (`MIRROR_ROLE_NOT_ALLOWED`);
   public clients are refused (`CLIENT_NOT_CONFIDENTIAL`); the role change guard applies (role not held, self-grant). Identity
   removes only the roles it manages, adopts a listed role a mirror already holds, leaves hand-set roles alone, records a role a

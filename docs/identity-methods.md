@@ -306,14 +306,15 @@ Declared role `TenantManagement` only, `dataAccess: Write`, idempotent, 300 s.
 
 Result `ClientMirrorRolesResult`: `roleNames`, `dryRun`, `tenants[]` (`ClientMirrorRoleTenantResult` per tracked mirror: `childTenantId`,
 `outcome` = `Applied` / `Planned` / `InSync` / `Skipped` / `Failed`, and the role name lists `added`, `removed`, `alreadyPresent`, `adopted`,
-`handSet`, `roleMissing`, `declined`). A `Failed` mirror is retried by the periodic mirror reconciliation; the call itself succeeds.
+`handSet`, `roleMissing`, `declined`, `roleRefused`). A `Failed` mirror is retried by the periodic mirror reconciliation; the call itself succeeds.
 
 Order of checks, each refusal writes nothing:
 
 1. Caller: scope `octo_api` **and** `TenantManagement` (not `UserManagement` alone; stricter than `Client.AddRole`, because the effect reaches every
    child tenant, also future ones) -> `METHOD_FORBIDDEN` / `role-required`.
 2. Target client exists and the caller may read and write it (as the other mirror methods).
-3. The tenant of the call lies in the caller's token tenant subtree (`CrossTenantMethodSupport.CheckTargetTenantAsync`): an administrator of a
+3. The tenant of the call lies in the caller's token tenant subtree (`CrossTenantMethodSupport.CheckTargetTenantAsync`, the rule of every mirror
+   method): a `TenantManagement` token of the original's tenant **or of one of its ancestor tenants** is admitted; an administrator of a
    child tenant cannot set the list of a parent's client -> `METHOD_FORBIDDEN` / `tenant-out-of-scope`.
 4. The target is no mirror (`ProvisionedByParentTenantId` empty) -> else `METHOD_FORBIDDEN` / `mirror-client`.
 5. More than 32 names -> `METHOD_VALIDATION_FAILED` (`field` = `roleNames`).
@@ -321,10 +322,14 @@ Order of checks, each refusal writes nothing:
    `MIRROR_ROLE_NOT_ALLOWED` (parameter `roleNames` = the refused names).
 7. A non-empty list on a client that is not confidential client-credentials (`RequireClientSecret` and grant type `client_credentials`) ->
    `CLIENT_NOT_CONFIDENTIAL`. Public clients (Studio, octo-cli) never hand roles to their mirrors.
-8. The role change guard for every name the list **adds** compared with the stored list (`IRoleChangeGuard.EvaluateClientGrantAsync`): a built-in
+8. Every name the list **adds** compared with the stored list must be a role of the tenant of the call (the original's tenant) that the caller
+   can read -> else `MIRROR_ROLE_NOT_FOUND` (parameter `roleNames` = the unknown names). Fail-closed: the guard of step 9 judges the caller
+   only there, so a role that exists only in a child tenant is never listed. The reconciliation backs this up in every child (`roleRefused`:
+   a name the original's tenant has no role of, or a built-in role of the child that is not the same built-in role there, is not granted).
+9. The role change guard for every name the list **adds** compared with the stored list (`IRoleChangeGuard.EvaluateClientGrantAsync`): a built-in
    role the caller does not hold -> `METHOD_FORBIDDEN` / `role-not-held`; a client-credentials caller extending its own client's list ->
    `METHOD_FORBIDDEN` / `self-grant`.
-9. A concurrent change of the client, or a stored list that is no longer the one the guard of step 8 judged against (another
+10. A concurrent change of the client, or a stored list that is no longer the one the guard of step 9 judged against (another
    administrator changed it in between) -> `CONCURRENT_CHANGE`; nothing is written.
 
 A real run reconciles each mirror from the list stored at that moment (read inside the per-mirror lock), a dry run from the

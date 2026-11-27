@@ -16,7 +16,7 @@ step, **no FixAll**. No data migration; ranges `System.Identity-[3.0.0,4.0)` sta
 
 - Optional attribute 'Client.MirrorRoleNames' (StringArray, TenantOwned) _(minor)_
 - Optional attributes 'ClientMirror.ManagedRoleNames', 'ClientMirror.DeclinedRoleNames' (StringArray) and 'ClientMirror.ManagedMirrorRtId' (String) _(minor)_
-- Method 'Client.SetMirrorRoles-1' (roles TenantManagement; errors MIRROR_ROLE_NOT_ALLOWED, CLIENT_NOT_CONFIDENTIAL, CONCURRENT_CHANGE) _(minor)_
+- Method 'Client.SetMirrorRoles-1' (roles TenantManagement; errors MIRROR_ROLE_NOT_ALLOWED, MIRROR_ROLE_NOT_FOUND, CLIENT_NOT_CONFIDENTIAL, CONCURRENT_CHANGE) _(minor)_
 - Records 'ClientMirrorRolesResult', 'ClientMirrorRoleTenantResult' and their RuntimeState member attributes _(minor)_
 
 ## 3.8.0 - 2026-11-18

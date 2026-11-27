@@ -51,3 +51,7 @@ attributes:
     valueType: StringArray
     ownership: RuntimeState
     description: "Method result member: listed roles a tenant administrator removed from the mirror; not assigned again."
+  - id: MirrorRoleTenantRoleRefused
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: listed roles the child tenant does not grant, because the tenant of the original has no role of that name or not the same built-in role; a managed one is removed."

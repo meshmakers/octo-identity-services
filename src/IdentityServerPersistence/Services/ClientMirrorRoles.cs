@@ -71,6 +71,42 @@ public static class ClientMirrorRoleRules
             .ToList();
     }
 
+    /// <summary>
+    ///     The listed names a child tenant must not grant (fail-closed): the caller's right to hand out a role is judged in the
+    ///     tenant of the original only, so a name counts in a child only as the role the original's tenant knows by it. A name
+    ///     is refused when the original's tenant has no role of that name (a role that exists only in a child, e.g. of an app
+    ///     installed there), or when the child's role of that name is a built-in role (it has an <c>rtWellKnownName</c>) and
+    ///     the original's role of that name is not the same built-in role (a custom role, or another well-known name). A
+    ///     listed name the child lacks is not refused here: it is missing there.
+    /// </summary>
+    /// <param name="desired">The names of the list (after <see cref="DesiredRoleNames" />).</param>
+    /// <param name="parentRoles">Every role of the original's tenant: name to <c>rtWellKnownName</c> (null for a custom role).</param>
+    /// <param name="childRoles">Every role of the child tenant: name to <c>rtWellKnownName</c> (null for a custom role).</param>
+    public static IReadOnlyList<string> RefusedInChild(IEnumerable<string> desired,
+        IReadOnlyDictionary<string, string?> parentRoles, IReadOnlyDictionary<string, string?> childRoles)
+    {
+        ArgumentNullException.ThrowIfNull(desired);
+        ArgumentNullException.ThrowIfNull(parentRoles);
+        ArgumentNullException.ThrowIfNull(childRoles);
+        var refused = new List<string>();
+        foreach (var name in desired)
+        {
+            if (!parentRoles.TryGetValue(name, out var parentWellKnown))
+            {
+                refused.Add(name);
+                continue;
+            }
+
+            if (childRoles.TryGetValue(name, out var childWellKnown) && !string.IsNullOrEmpty(childWellKnown) &&
+                !string.Equals(childWellKnown, parentWellKnown, StringComparison.OrdinalIgnoreCase))
+            {
+                refused.Add(name);
+            }
+        }
+
+        return refused;
+    }
+
     /// <summary>Trimmed, non-blank, distinct (case-insensitive) names in their first spelling.</summary>
     public static IReadOnlyList<string> Normalize(IEnumerable<string?> names)
     {
@@ -130,10 +166,11 @@ public sealed record MirrorRoleTenantResult(
     IReadOnlyList<string> Adopted,
     IReadOnlyList<string> HandSet,
     IReadOnlyList<string> RoleMissing,
-    IReadOnlyList<string> Declined)
+    IReadOnlyList<string> Declined,
+    IReadOnlyList<string> RoleRefused)
 {
     public static MirrorRoleTenantResult Empty(string childTenantId, MirrorRoleOutcome outcome) =>
-        new(childTenantId, outcome, [], [], [], [], [], [], []);
+        new(childTenantId, outcome, [], [], [], [], [], [], [], []);
 }
 
 /// <summary>Result of a role reconciliation over every tracked mirror of one client.</summary>
@@ -156,6 +193,10 @@ public sealed record ClientMirrorRolesResult(
 /// <param name="NewlyDeclined">Of <paramref name="Declined" />: the roles this pass found removed (audited once).</param>
 /// <param name="Managed">ManagedRoleNames after the pass.</param>
 /// <param name="DeclinedAfter">DeclinedRoleNames after the pass.</param>
+/// <param name="RoleRefused">
+///     Listed roles the child must not grant (<see cref="ClientMirrorRoleRules.RefusedInChild" />): not assigned, and a
+///     managed one is removed, as if it were not listed.
+/// </param>
 public sealed record MirrorRolePlan(
     IReadOnlyList<string> Add,
     IReadOnlyList<string> Remove,
@@ -166,7 +207,8 @@ public sealed record MirrorRolePlan(
     IReadOnlyList<string> Declined,
     IReadOnlyList<string> NewlyDeclined,
     IReadOnlyList<string> Managed,
-    IReadOnlyList<string> DeclinedAfter)
+    IReadOnlyList<string> DeclinedAfter,
+    IReadOnlyList<string> RoleRefused)
 {
     /// <summary><c>true</c> when a role edge must be written.</summary>
     public bool ChangesRoles => Add.Count > 0 || Remove.Count > 0;
@@ -183,10 +225,18 @@ public sealed record MirrorRolePlan(
     ///     <c>true</c> when the tracking row refers to this mirror (ManagedMirrorRtId is its rtId). A re-created mirror starts
     ///     over: nothing it lacks counts as declined, and it is granted again.
     /// </param>
+    /// <param name="refused">
+    ///     Listed names the child must not grant (<see cref="ClientMirrorRoleRules.RefusedInChild" />); treated as not listed
+    ///     and reported in <see cref="RoleRefused" />.
+    /// </param>
     public static MirrorRolePlan Compute(IReadOnlyList<string> desired, IEnumerable<string> childRoleNames,
-        IEnumerable<string> current, IEnumerable<string>? managed, IEnumerable<string>? declined, bool sameMirror)
+        IEnumerable<string> current, IEnumerable<string>? managed, IEnumerable<string>? declined, bool sameMirror,
+        IEnumerable<string>? refused = null)
     {
         var comparer = StringComparer.OrdinalIgnoreCase;
+        var refusedSet = new HashSet<string>(refused ?? [], comparer);
+        var roleRefused = desired.Where(refusedSet.Contains).ToList();
+        desired = desired.Where(n => !refusedSet.Contains(n)).ToList();
         var existing = new Dictionary<string, string>(comparer);
         foreach (var name in childRoleNames.Where(n => !string.IsNullOrWhiteSpace(n)))
         {
@@ -256,7 +306,7 @@ public sealed record MirrorRolePlan(
             .Order(comparer).ToList();
 
         return new MirrorRolePlan(add, remove, present, adopted, handSet, missing, declinedListed, newlyDeclined,
-            managedAfter.Order(comparer).ToList(), declinedSet.Order(comparer).ToList());
+            managedAfter.Order(comparer).ToList(), declinedSet.Order(comparer).ToList(), roleRefused);
     }
 }
 
@@ -279,9 +329,16 @@ public sealed record MirrorRolePlan(
 ///     </para>
 ///     <para>
 ///         <b>Order and concurrency.</b> The row is read first, then the child; the role edges are written before the row,
-///         and the row with the version it was read with. A concurrent writer makes the row write fail; the next pass
-///         converges (an added edge without its row write is adopted, a removed one is forgotten). Never a secret in a log or
-///         audit event: role names, client id and tenant ids only.
+///         and the row with the version it was read with. A concurrent writer makes the row write fail; the row is read
+///         again and this pass's change merged into it once (three-way), so an added edge is recorded as managed. Should
+///         that write fail too, the next pass converges (an added edge without its row write is adopted while it is still
+///         listed). Never a secret in a log or audit event: role names, client id and tenant ids only.
+///     </para>
+///     <para>
+///         <b>Names count as the original's tenant knows them (fail-closed).</b> The method judges the caller in the tenant
+///         of the original. A listed name that tenant has no role of, or whose child role is a built-in role that is not
+///         the same built-in role in the original's tenant, is not granted in the child (<c>RoleRefused</c>, WARN); a
+///         managed one is removed.
 ///     </para>
 /// </remarks>
 internal sealed class ClientMirrorRoleReconciler(ILogger logger, IEventRepository? eventRepository)
@@ -384,9 +441,25 @@ internal sealed class ClientMirrorRoleReconciler(ILogger logger, IEventRepositor
         var current = edges.Select(e => nameById.GetValueOrDefault(e.TargetRtId.ToString()))
             .Where(n => n != null).Select(n => n!).ToList();
 
+        // Fail-closed: a name counts in the child only as the role the original's tenant knows by it (the method judged the
+        // caller there). A name the original's tenant lacks, or a built-in role of the child that is not the same built-in
+        // role in the original's tenant, is never granted.
+        var refused = desired.Count == 0
+            ? []
+            : ClientMirrorRoleRules.RefusedInChild(desired,
+                await WellKnownNamesAsync(parentRepo, parentSession).ConfigureAwait(false),
+                roleByName.ToDictionary(p => p.Key, p => p.Value.RtWellKnownName, StringComparer.OrdinalIgnoreCase));
+
         var sameMirror = string.Equals(row.ManagedMirrorRtId, mirror.RtId.ToString(), StringComparison.Ordinal);
         var plan = MirrorRolePlan.Compute(desired, roleByName.Keys, current, row.ManagedRoleNames,
-            row.DeclinedRoleNames, sameMirror);
+            row.DeclinedRoleNames, sameMirror, refused);
+
+        if (plan.RoleRefused.Count > 0)
+        {
+            logger.LogWarning(
+                "Mirror roles of clientId='{ClientId}' in child '{ChildTenantId}': role(s) {RoleNames} are not granted, the tenant of the original '{ParentTenantId}' has no role of that name or not the same built-in role",
+                clientId, childTenantId, string.Join(",", plan.RoleRefused), parentTenantId);
+        }
 
         if (plan.RoleMissing.Count > 0)
         {
@@ -449,24 +522,101 @@ internal sealed class ClientMirrorRoleReconciler(ILogger logger, IEventRepositor
             await BeforeRowWriteForTests(clientId, childTenantId).ConfigureAwait(false);
         }
 
-        // 3. The row, version-checked. A conflict means another writer was faster; the next pass converges.
+        // 3. The row, version-checked. On a conflict (a rotation, a sync or another replica bumped the row since it was read)
+        // the row is read again and this pass's change is merged into it once: the edges are written already, so a role
+        // added here must be recorded as managed, or clearing the list before the next pass would leave it as hand-set.
+        var baseManaged = row.ManagedRoleNames?.ToList() ?? [];
+        var baseDeclined = row.DeclinedRoleNames?.ToList() ?? [];
+        var mirrorRtId = mirror.RtId.ToString();
         row.ManagedRoleNames = new AttributeStringValueList(plan.Managed.ToList());
         row.DeclinedRoleNames = new AttributeStringValueList(plan.DeclinedAfter.ToList());
-        row.ManagedMirrorRtId = mirror.RtId.ToString();
+        row.ManagedMirrorRtId = mirrorRtId;
         try
         {
             await parentRepo.ReplaceOneRtEntityByIdAsync(parentSession, row.RtId, row, row.RtVersion)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is RtVersionConflictException or EntityNotFoundException)
+        catch (RtVersionConflictException)
+        {
+            await MergeRowOnceAsync(parentRepo, parentSession, row.RtId, clientId, childTenantId, mirrorRtId,
+                plan, baseManaged, baseDeclined).ConfigureAwait(false);
+        }
+        catch (EntityNotFoundException)
         {
             logger.LogDebug(
-                "Mirror role tracking of clientId='{ClientId}' child='{ChildTenantId}' changed concurrently; the next pass converges",
+                "Mirror role tracking of clientId='{ClientId}' child='{ChildTenantId}' was removed concurrently; the next pass converges",
                 clientId, childTenantId);
         }
 
         await AuditAsync(childTenantId, clientId, parentTenantId, plan).ConfigureAwait(false);
         return ToResult(childTenantId, MirrorRoleOutcome.Applied, plan);
+    }
+
+    /// <summary>
+    ///     Merges this pass's tracking change into a row another writer changed since it was read (three-way, per list: a
+    ///     name stays when both sides keep it and is taken when either side added it). Tried once; a second conflict is left
+    ///     to the next pass.
+    /// </summary>
+    private async Task MergeRowOnceAsync(ITenantRepository parentRepo, IOctoSession parentSession, OctoObjectId rowId,
+        string clientId, string childTenantId, string mirrorRtId, MirrorRolePlan plan,
+        IReadOnlyList<string> baseManaged, IReadOnlyList<string> baseDeclined)
+    {
+        try
+        {
+            var fresh = await parentRepo.GetRtEntityByRtIdAsync<RtClientMirror>(parentSession, rowId)
+                .ConfigureAwait(false);
+            if (fresh == null)
+            {
+                return;
+            }
+
+            // A row that meanwhile refers to another mirror holds that mirror's lists: this pass's lists replace them.
+            var theirsSameMirror = fresh.ManagedMirrorRtId == null ||
+                                   string.Equals(fresh.ManagedMirrorRtId, mirrorRtId, StringComparison.Ordinal);
+            fresh.ManagedRoleNames = new AttributeStringValueList(theirsSameMirror
+                ? MergeThreeWay(baseManaged, plan.Managed, fresh.ManagedRoleNames)
+                : plan.Managed.ToList());
+            fresh.DeclinedRoleNames = new AttributeStringValueList(theirsSameMirror
+                ? MergeThreeWay(baseDeclined, plan.DeclinedAfter, fresh.DeclinedRoleNames)
+                : plan.DeclinedAfter.ToList());
+            fresh.ManagedMirrorRtId = mirrorRtId;
+            await parentRepo.ReplaceOneRtEntityByIdAsync(parentSession, fresh.RtId, fresh, fresh.RtVersion)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is RtVersionConflictException or EntityNotFoundException)
+        {
+            logger.LogDebug(
+                "Mirror role tracking of clientId='{ClientId}' child='{ChildTenantId}' changed concurrently twice; the next pass converges",
+                clientId, childTenantId);
+        }
+    }
+
+    /// <summary>Three-way set merge: kept by both, or added by either side (case-insensitive, ordered).</summary>
+    internal static List<string> MergeThreeWay(IEnumerable<string> baseline, IEnumerable<string> ours,
+        IEnumerable<string>? theirs)
+    {
+        var comparer = StringComparer.OrdinalIgnoreCase;
+        var b = new HashSet<string>(baseline, comparer);
+        var o = new HashSet<string>(ours, comparer);
+        var t = new HashSet<string>(theirs ?? [], comparer);
+        var result = new HashSet<string>(o.Where(t.Contains), comparer);
+        result.UnionWith(o.Where(n => !b.Contains(n)));
+        result.UnionWith(t.Where(n => !b.Contains(n)));
+        return result.Order(comparer).ToList();
+    }
+
+    /// <summary>Every role of a tenant: name to <c>rtWellKnownName</c> (null for a custom role).</summary>
+    private static async Task<IReadOnlyDictionary<string, string?>> WellKnownNamesAsync(ITenantRepository repo,
+        IOctoSession session)
+    {
+        var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var role in (await repo.GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create())
+                     .ConfigureAwait(false)).Items.Where(r => !string.IsNullOrWhiteSpace(r.Name)))
+        {
+            result.TryAdd(role.Name!.Trim(), role.RtWellKnownName);
+        }
+
+        return result;
     }
 
     private static async Task<RtClient?> FindTrackedMirrorAsync(ITenantRepository childRepo, IOctoSession childSession,
@@ -547,7 +697,7 @@ internal sealed class ClientMirrorRoleReconciler(ILogger logger, IEventRepositor
 
     private static MirrorRoleTenantResult ToResult(string childTenantId, MirrorRoleOutcome outcome, MirrorRolePlan plan) =>
         new(childTenantId, outcome, plan.Add, plan.Remove, plan.AlreadyPresent, plan.Adopted, plan.HandSet,
-            plan.RoleMissing, plan.Declined);
+            plan.RoleMissing, plan.Declined, plan.RoleRefused);
 
     private static bool IsEmpty(IEnumerable<string>? names) => names == null || !names.Any();
 
