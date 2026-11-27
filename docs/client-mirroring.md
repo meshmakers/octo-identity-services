@@ -194,11 +194,13 @@ escalation and read as if mirroring were a defect. It is not.
   secret**. What is distributed there is a *login surface*, not a credential; none of them can get a
   `client_credentials` token. The confidential mirrored clients (`ci-deploy`, `octo-ai-adapter`,
   `claude-agent`) exist only as imperative setup and are the subject of the migration above.
-- **Roles are not mirrored.** `ClientMirrorProvisioningService` copies `RtClient` *attributes* only —
-  it touches no `AssignedRole` edge and no group membership. A mirror is therefore **authenticated but
-  rightless** in the child tenant until somebody grants it roles *there*
-  (`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}`). **That is the actual boundary
-  downwards**, and it is the one to reason about.
+- **Roles are mirrored only by allow-list.** `CreateMirrorClient` copies `RtClient` *attributes* only,
+  and never `MirrorRoleNames`. A mirror holds no role in the child tenant unless its original lists the
+  role in `Client.MirrorRoleNames` (System.Identity 3.9.0, set with `Client.SetMirrorRoles-1`; empty by
+  default) or somebody grants it *there* by hand (`Client.AddRole-1` in the child). Group memberships
+  are never mirrored. **The roles a mirror holds in the addressed tenant are the boundary downwards**,
+  and the list is the one place that widens it for every child tenant at once: see "Roles mirrored by
+  allow-list" below.
 - 🔴 **While the inherited secret is accepted, a `tenant_id` claim on a client-credentials token does
   not prove which tenant the caller came from** — only which tenant the token was issued *for*.
   Whoever holds a child's credentials holds the parent's. **Do not authorize on it** (this is exactly
@@ -268,3 +270,80 @@ failing the authentication; nothing secret in the rendered log) and
 (a real mirror in MongoDB read back through the repository and authenticated with **both** credentials
 through the production manager — the test that catches a provisioning change dropping `Description`,
 which would otherwise make the measurement silently read zero).
+
+## Roles mirrored by allow-list (System.Identity 3.9.0, AB#9923)
+
+A confidential platform client that identity mirrors into every child tenant (the `ci-deploy-{cluster}` clients of the CD,
+AB#9562) needs a role in each tenant it deploys to. Instead of a grant per tenant (and again for every new tenant), the
+original client carries the list of roles its mirrors get.
+
+**Model.** `Client.MirrorRoleNames` (StringArray, optional, `TenantOwned`, default empty) on the original; the tracking row
+`ClientMirror` (one per client and child tenant, in the parent tenant) records `ManagedRoleNames` (the role assignments identity
+made or adopted on that mirror), `DeclinedRoleNames` (listed roles the child tenant's administrator removed) and
+`ManagedMirrorRtId` (the mirror both lists refer to). Set with `Client.SetMirrorRoles-1` (`roleNames`, `dryRun`; rules and errors
+in `docs/identity-methods.md`). `CreateMirrorClient` never copies the list: a mirror is never a source.
+
+**Who may set it.** Scope `octo_api` and `TenantManagement` in the tenant of the original; the caller must hold every built-in role
+it adds (role change guard) and a client cannot extend its own list. **Deny-list:** `TenantManagement`, `UserManagement`,
+`SecretManagement`, `AdminPanelManagement` and `AiBudgetAdmin` are never mirrored (`MIRROR_ROLE_NOT_ALLOWED`); the reconciliation
+drops them too, should a list ever reach the store another way. **Only confidential client-credentials clients**
+(`RequireClientSecret` and grant `client_credentials`): a public client (Studio, octo-cli) never gets roles through its mirrors,
+neither by the method (`CLIENT_NOT_CONFIDENTIAL`) nor by the reconciliation.
+
+**Where it is applied.** After every mirror convergence, in the server's system context (`ClientMirrorRoleReconciler`,
+`ClientMirrorRoles.cs`): the tenant setup (creation, restart, `ReRunTenantSetup`, also for nested tenants: the mirror source is
+the system tenant for every tenant at any depth, `DefaultConfigurationCreatorService`), `Client.ProvisionMirrorInTenant-1`,
+`Client.ProvisionMirrors-1`, the mirror sync after an update of the original, the periodic `ClientMirrorReconciliationJob` (the
+backstop) and `Client.SetMirrorRoles-1` itself. A scratch tenant of another parent applies that parent's list. The mirror secret
+rotation does not touch roles.
+
+**Per mirror** (`MirrorRolePlan.Compute`, role names compared case-insensitively):
+
+| Case | What identity does |
+|---|---|
+| Listed role, not on the mirror | assigns it, records it as managed |
+| Listed role the mirror holds already (e.g. the hand grant of AB#9562) | **adopts** it: managed from now on, no second edge |
+| Managed role the list no longer names (also: list cleared) | removes it |
+| Role on the mirror the list does not name and identity does not manage | leaves it alone, reports it as `handSet` |
+| Listed role that does not exist in the child tenant | WARN, `roleMissing`, provisioning goes on; assigned on the first pass after it exists |
+| Managed listed role that is gone from the **same** mirror (rtId unchanged) | the tenant removed it: recorded as **declined**, WARN, audit event, never assigned again on that mirror |
+| Declined role the tenant assigns again by hand | no longer declined, adopted |
+| Mirror re-created (another rtId: deleted and inserted again by the reconciliation or a restore) | starts over: the recorded roles no longer describe it, so the listed roles are granted again and earlier declines are dropped |
+
+**Only tracked mirrors.** A role goes only to the child's client that carries this parent's mirror marker and has a tracking row of
+this parent. A client of the same id without them - a stray copy restored from another cluster's dump (AB#8533), or the child's
+own client - never gets a role.
+
+**Tenant owner (customer tenants).** No consent up front (decided by Gerald 2026-11-27: a parent administrator may already grant the
+same role by hand); the tenant keeps the last word through the decline rule above. Every grant, removal, adoption and decline is an
+information event in the child tenant's event log and in the system event log (`IEventRepository`, the pattern of the scratch
+creator grant, AB#7192), with client id, tenant ids and role names only.
+
+**Failures.** A failed write is logged as ERROR (client id, tenant, never a secret) and never fails a tenant setup, a provisioning
+call or a reconciliation pass; the next pass retries it. The role edges are written before the tracking row, and the row with the
+version it was read with: an edge whose row write failed is adopted by the next pass, a removed edge whose row write failed is
+forgotten by it. Concurrent passes of two replicas: the second row write fails on the version, the next pass converges.
+
+**Changing or clearing the list** reconciles every tracked mirror at once: added roles are assigned, removed roles are taken away
+only where identity manages them (adopted hand grants count as managed), hand-set roles stay and are listed. Switching
+`AutoProvisionInChildTenants` off leaves the mirrors and their roles as they are; a removed mirror or a deleted tenant takes its role
+edges with it.
+
+⚠️ **Open risk: the inherited parent secret.** A mirror still accepts the parent's secret in every child tenant ("Per-Tenant Mirror
+Secrets" above, step 4 open). With a mirrored role, **one leaked secret of such a client holds that role in every tenant of the
+cluster, also in tenants created later.** The deny-list, confidential clients only and a narrow deploy role (AB#9894) instead of
+`CommunicationManagement` limit the blast radius; per-mirror own secrets only (`docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md`) are the
+real fix. Keep lists short and specific.
+
+**Cross-tenant.** A mirror's token carries `tenant_id` = the child and its roles are resolved there; the method gateway refuses a
+token in another tenant (AB#8711). The original's system-tenant token gains nothing in a child, and a mirror's token of tenant A gains
+nothing in a tenant B whose mirror does not hold the role.
+
+Operator commands (preview, set, read) follow in octo-cli and the MCP server (AB#9926); the per-cluster adoption of the existing hand
+grants with a dry-run table per cluster in AB#9927.
+
+Tests: `ClientMirrorRolePlanTests` (rules and plan), `ClientMirrorRolesIntegrationTests` (real MongoDB: new child, nested grandchild
+through the tenant setup, missing role, list change with a hand-set role, adoption and clearing, dry run, declined and re-created
+mirror, stray copy, public client, failing write retried, rotation and no secret in the rendered log) and
+`ClientSetMirrorRolesMethodTests` (real host: caller rule, deny-list, public client, role not held, self-grant, child administrator,
+mirror as target, dry run, audit, and real client-credentials tokens per tenant through the method authorization).

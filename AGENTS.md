@@ -169,6 +169,11 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
   `AdminProvisioningService`); the REST writes are facades. A handler that writes into another tenant checks that tenant against the caller's token
   tenant subtree (`AdminProvisioningTargetScope`, shared with the REST filter) before any lookup or write: `docs/identity-rest-facades.md`,
   `docs/identity-methods.md`.
+- **Mirror roles (AB#9923) are assigned only by `ClientMirrorRoleReconciler`** (`Services/ClientMirrorRoles.cs`), called after every mirror
+  convergence of `ClientMirrorProvisioningService` and by `Client.SetMirrorRoles-1`. A new writer of a mirror or its tracking row must keep
+  the order (row read first, edges before the row, the row version-checked) and call the reconciler after its write; the deny-list
+  (`ClientMirrorRoleRules.DeniedRoleNames`) is enforced in the handler **and** in the reconciler. Only `ManagedRoleNames` are ever removed:
+  `docs/client-mirroring.md` ("Roles mirrored by allow-list").
 - **Roles, groups, API scopes and API resources are created, changed and deleted only in their CRUD handlers** (`Role.CreateRole/UpdateRole/DeleteRole`,
   `Group.CreateGroup/UpdateGroup/DeleteGroup`, `ApiScope.*` and `ApiResource.*` create/update/delete, System.Identity 3.7.0); the REST write endpoints
   are facades, derived names are set by the handlers, and the static creates check the caller's `Write` permission on the type: `docs/identity-rest-facades.md`.

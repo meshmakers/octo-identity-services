@@ -9,6 +9,7 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.Extensions.Logging;
 using IdentityServerPersistence.Services.ScratchTenants;
+using Meshmakers.Octo.Services.Notifications.Services;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services;
@@ -19,9 +20,13 @@ public class ClientMirrorProvisioningService(
     ISystemContext systemContext,
     ITenantDiscoveryService tenantDiscoveryService,
     IDistributionEventHubService? distributionEventHubService = null,
-    IScratchTenantGrantService? scratchTenantGrantService = null)
+    IScratchTenantGrantService? scratchTenantGrantService = null,
+    IEventRepository? eventRepository = null)
     : IClientMirrorProvisioningService
 {
+    /// <summary>AB#9923: assigns the roles of <c>Client.MirrorRoleNames</c> after every mirror convergence.</summary>
+    internal ClientMirrorRoleReconciler Roles { get; } = new(logger, eventRepository);
+
     /// <summary>
     ///     AB#5487: tells every Identity pod that the client (and with it the CORS origins) of a tenant changed, so
     ///     the cached CORS policy is rebuilt. Without it a tenant that gets its app client mirrored in after the
@@ -247,6 +252,8 @@ public class ClientMirrorProvisioningService(
                 // like the reconciliation does; a row that changed or vanished meanwhile withdraws the insert.
                 await ClaimTrackingRowAsync(parentRepo, parentSession, existingMirrorResult.Items.First(), trackedWrite,
                     childRepo, childSession);
+                await Roles.ReconcileAsync(parentRepo, parentSession, parentTenantId, verifyClientId, childTenantId,
+                    childRepo, plannedRoleNames: null, dryRun: false);
                 alreadyPresent++;
                 continue;
             }
@@ -298,6 +305,8 @@ public class ClientMirrorProvisioningService(
             logger.LogInformation(
                 "Provisioned client mirror: clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}'",
                 parentClient.ClientId, parentTenantId, childTenantId);
+            await Roles.ReconcileAsync(parentRepo, parentSession, parentTenantId, newClientId, childTenantId, childRepo,
+                plannedRoleNames: null, dryRun: false);
         }
 
         if (newlyProvisioned > 0)
@@ -389,6 +398,8 @@ public class ClientMirrorProvisioningService(
                 }
 
                 synced++;
+                await Roles.ReconcileAsync(parentRepo, parentSession, parentTenantId, clientId, mirror.ChildTenantId,
+                    childRepo, plannedRoleNames: null, dryRun: false);
                 await PublishCorsClientsUpdateAsync(mirror.ChildTenantId);
                 logger.LogInformation(
                     "Synced client mirror: clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}' version={Version}",
@@ -576,10 +587,12 @@ public class ClientMirrorProvisioningService(
                 childSession, missingKey);
         }
 
+        RtClient? readParent = null;
         var write = await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, row.ParentClientId,
             async () =>
             {
                 var parent = await FindParentClientAsync(parentRepo, parentSession, row.ParentClientId);
+                readParent = parent;
                 if (parent != null && BeforeMirrorWriteForTests != null)
                 {
                     await BeforeMirrorWriteForTests(row.ParentClientId, row.ChildTenantId);
@@ -598,6 +611,9 @@ public class ClientMirrorProvisioningService(
         MissingParentPasses.TryRemove(missingKey, out _);
         if (write == MirrorWriteResult.InSync)
         {
+            // AB#9923: the backstop of the mirror roles; a no-op read for a mirror without a list or tracked roles.
+            await Roles.ReconcileAsync(parentRepo, parentSession, parentTenantId, row.ParentClientId, row.ChildTenantId,
+                childRepo, plannedRoleNames: null, dryRun: false, parentClient: readParent);
             return MirrorReconcileOutcome.InSync;
         }
 
@@ -620,6 +636,8 @@ public class ClientMirrorProvisioningService(
             return MirrorReconcileOutcome.Skipped;
         }
 
+        await Roles.ReconcileAsync(parentRepo, parentSession, parentTenantId, row.ParentClientId, row.ChildTenantId,
+            childRepo, plannedRoleNames: null, dryRun: false, parentClient: readParent);
         await PublishCorsClientsUpdateAsync(row.ChildTenantId);
 
         // Names only: never a secret value or hash.
@@ -687,6 +705,8 @@ public class ClientMirrorProvisioningService(
             return MirrorReconcileOutcome.Skipped;
         }
 
+        await Roles.ReconcileAsync(parentRepo, parentSession, parentTenantId, row.ParentClientId, row.ChildTenantId,
+            childRepo, plannedRoleNames: null, dryRun: false);
         await PublishCorsClientsUpdateAsync(row.ChildTenantId);
         logger.LogInformation(
             "Reconciled client mirror (re-created): clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}' version={Version}",
@@ -1164,6 +1184,86 @@ public class ClientMirrorProvisioningService(
         }
 
         return new ClientMirrorBackfillResult(considered, newly, present);
+    }
+
+    public async Task<ClientMirrorRolesResult?> SetMirrorRolesAsync(string parentTenantId, string parentClientId,
+        IReadOnlyList<string> roleNames, bool dryRun, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        if (string.IsNullOrWhiteSpace(parentClientId))
+        {
+            throw new ArgumentException("Parent client id is required.", nameof(parentClientId));
+        }
+
+        ArgumentNullException.ThrowIfNull(roleNames);
+        var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
+        if (parentRepo == null)
+        {
+            return null;
+        }
+
+        var normalized = ClientMirrorRoleRules.Normalize(roleNames);
+        if (dryRun)
+        {
+            using var readSession = await parentRepo.GetSessionAsync();
+            if (await FindParentClientAsync(parentRepo, readSession, parentClientId) == null)
+            {
+                return null;
+            }
+        }
+        else
+        {
+            // Version-checked read-modify-write of the original only: no mirror attribute changes, so the mirror sync of the
+            // client store is not needed; the reconciliation below writes the roles.
+            var stored = await SystemStores.GuardedEntityMutation.MutateAsync(parentRepo,
+                session => FindParentClientAsync(parentRepo, session, parentClientId), client =>
+                {
+                    if ((client.MirrorRoleNames ?? Enumerable.Empty<string>()).SequenceEqual(normalized,
+                            StringComparer.Ordinal))
+                    {
+                        return false;
+                    }
+
+                    client.MirrorRoleNames = new AttributeStringValueList(normalized.ToList());
+                    return true;
+                });
+            if (stored == null)
+            {
+                return null;
+            }
+
+            logger.LogInformation(
+                "Mirror role list of clientId='{ClientId}' in tenant '{ParentTenantId}' set to [{RoleNames}]",
+                parentClientId, parentTenantId, string.Join(",", normalized));
+        }
+
+        using var parentSession = await parentRepo.GetSessionAsync();
+        var rows = await GetMirrorsForClientAsync(parentRepo, parentSession, parentClientId);
+        var childRepos = new Dictionary<string, ITenantRepository?>(StringComparer.OrdinalIgnoreCase);
+        var tenants = new List<MirrorRoleTenantResult>();
+        foreach (var row in rows.OrderBy(r => r.ChildTenantId, StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(row.ChildTenantId))
+            {
+                continue;
+            }
+
+            if (!childRepos.TryGetValue(row.ChildTenantId, out var childRepo))
+            {
+                childRepo = await systemContext.TryFindTenantRepositoryAsync(row.ChildTenantId);
+                childRepos[row.ChildTenantId] = childRepo;
+            }
+
+            tenants.Add(await Roles.ReconcileAsync(parentRepo, parentSession, parentTenantId, parentClientId,
+                row.ChildTenantId, childRepo, normalized, dryRun));
+        }
+
+        return new ClientMirrorRolesResult(normalized, dryRun, tenants);
     }
 
     public async Task<IReadOnlyList<RtClientMirror>> GetMirrorsAsync(

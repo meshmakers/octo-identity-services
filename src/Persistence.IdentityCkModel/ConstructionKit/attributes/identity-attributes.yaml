@@ -725,6 +725,28 @@ attributes:
     ownership: SeedOwned
     description: When set on a Client living in a child tenant, marks this record as a mirror of a parent-tenant client identified by the given tenant id. Sub-tenant admins surface this as a read-only "Provisioned by parent tenant" indicator; the operator cannot edit the client locally — changes must go through the parent.
 
+  # 3.9.0 (AB#9923): roles a client hands to its mirrors. The list lives on the original (TenantOwned: a blueprint update of
+  # the client never resets the operator's choice); the tracking row records what identity assigned on each mirror.
+  - id: MirrorRoleNames
+    valueType: StringArray
+    ownership: TenantOwned
+    description: Names of the roles identity assigns to every tracked mirror of this client in its child tenants (set with Client.SetMirrorRoles-1). Only confidential client_credentials clients may carry a list; TenantManagement, UserManagement, SecretManagement, AdminPanelManagement and AiBudgetAdmin are never mirrored. Never copied to a mirror. Empty means no roles are mirrored.
+
+  - id: ManagedRoleNames
+    valueType: StringArray
+    ownership: SeedOwned
+    description: Role names identity assigned (or adopted) on the mirror in the child tenant because the original's MirrorRoleNames lists them. Only these roles are ever removed by identity; roles set by hand on the mirror are left alone.
+
+  - id: DeclinedRoleNames
+    valueType: StringArray
+    ownership: SeedOwned
+    description: Mirrored role names a tenant administrator of the child tenant removed from the mirror. Identity does not assign them again on that mirror; a re-created mirror (another rtId) is granted again.
+
+  - id: ManagedMirrorRtId
+    valueType: String
+    ownership: SeedOwned
+    description: RtId of the mirror client in the child tenant that ManagedRoleNames and DeclinedRoleNames refer to. A mirror with another rtId was re-created (deleted and inserted again), so the recorded roles no longer describe it.
+
   - id: DynamicRegistration
     valueType: Boolean
     ownership: SeedOwned

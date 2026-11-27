@@ -292,6 +292,45 @@ the REST facade, a bus or GraphQL call without `SecretManagement` is refused); `
 - REST facades and parity table: `docs/identity-rest-facades.md`. Tests: `Api/TenantApi/ClientMirrorRestMethodFacadeTests`,
   `Controllers/ClientMirrorControllerTests`, `Methods/IdentityMethodHostTests`, `Persistence/IdentityMethodDeclarationsIntegrationTests`.
 
+## `Client.SetMirrorRoles` (System.Identity 3.9.0, AB#9923)
+
+Instance method on the **original** client: sets `Client.MirrorRoleNames` (the roles identity assigns to every tracked mirror of the
+client in its child tenants) and reconciles the existing mirrors (`ClientSetMirrorRolesHandler` in `Methods/ClientMirrorHandlers.cs`, logic
+in `IClientMirrorProvisioningService.SetMirrorRolesAsync` and `ClientMirrorRoles.cs`). No REST facade (methods only, Epic AB#9221).
+Declared role `TenantManagement` only, `dataAccess: Write`, idempotent, 300 s.
+
+| Parameter | Meaning |
+|---|---|
+| `roleNames` (StringArray) | The complete list; trimmed, distinct (case-insensitive), at most 32 names. Empty clears the list and removes every role identity manages on the mirrors. |
+| `dryRun` (Boolean, optional, omitted = false) | `true`: the same per-tenant plan, nothing is written anywhere (neither the list nor a mirror nor a tracking row). |
+
+Result `ClientMirrorRolesResult`: `roleNames`, `dryRun`, `tenants[]` (`ClientMirrorRoleTenantResult` per tracked mirror: `childTenantId`,
+`outcome` = `Applied` / `Planned` / `InSync` / `Skipped` / `Failed`, and the role name lists `added`, `removed`, `alreadyPresent`, `adopted`,
+`handSet`, `roleMissing`, `declined`). A `Failed` mirror is retried by the periodic mirror reconciliation; the call itself succeeds.
+
+Order of checks, each refusal writes nothing:
+
+1. Caller: scope `octo_api` **and** `TenantManagement` (not `UserManagement` alone; stricter than `Client.AddRole`, because the effect reaches every
+   child tenant, also future ones) -> `METHOD_FORBIDDEN` / `role-required`.
+2. Target client exists and the caller may read and write it (as the other mirror methods).
+3. The tenant of the call lies in the caller's token tenant subtree (`CrossTenantMethodSupport.CheckTargetTenantAsync`): an administrator of a
+   child tenant cannot set the list of a parent's client -> `METHOD_FORBIDDEN` / `tenant-out-of-scope`.
+4. The target is no mirror (`ProvisionedByParentTenantId` empty) -> else `METHOD_FORBIDDEN` / `mirror-client`.
+5. More than 32 names -> `METHOD_VALIDATION_FAILED` (`field` = `roleNames`).
+6. Deny-list: `TenantManagement`, `UserManagement`, `SecretManagement`, `AdminPanelManagement`, `AiBudgetAdmin` (any spelling) ->
+   `MIRROR_ROLE_NOT_ALLOWED` (parameter `roleNames` = the refused names).
+7. A non-empty list on a client that is not confidential client-credentials (`RequireClientSecret` and grant type `client_credentials`) ->
+   `CLIENT_NOT_CONFIDENTIAL`. Public clients (Studio, octo-cli) never hand roles to their mirrors.
+8. The role change guard for every name the list **adds** compared with the stored list (`IRoleChangeGuard.EvaluateClientGrantAsync`): a built-in
+   role the caller does not hold -> `METHOD_FORBIDDEN` / `role-not-held`; a client-credentials caller extending its own client's list ->
+   `METHOD_FORBIDDEN` / `self-grant`.
+9. A concurrent change of the client -> `CONCURRENT_CHANGE`.
+
+Audit: one `Identity.Method` event per call with `clientId`, `roleNames`, `dryRun`, `mirrors`, `failed` and `reason` on a refusal; every grant,
+removal, adoption and decline on a mirror is also an information event in the child tenant (and in the system event log), see
+`docs/client-mirroring.md` ("Roles mirrored by allow-list"). Never a secret. Tests: `Api/Methods/ClientSetMirrorRolesMethodTests` (real host,
+real client-credentials tokens per tenant), `Persistence/ClientMirrorRolesIntegrationTests`, `Services/ClientMirrorRolePlanTests`.
+
 ## Admin provisioning and the mapping create (System.Identity 3.5.0)
 
 Static methods on `System.Identity/ExternalTenantUserMapping` (`Methods/AdminProvisioningHandlers.cs`); the provisioning writes are

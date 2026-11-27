@@ -839,6 +839,10 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase, IDisposable
         public Task<MirrorSecretRotationResult?> RotateMirrorSecretAsync(string parentTenantId,
             string parentClientId, string childTenantId) =>
             inner.RotateMirrorSecretAsync(parentTenantId, parentClientId, childTenantId);
+
+        public Task<ClientMirrorRolesResult?> SetMirrorRolesAsync(string parentTenantId, string parentClientId,
+            IReadOnlyList<string> roleNames, bool dryRun, CancellationToken cancellationToken = default) =>
+            inner.SetMirrorRolesAsync(parentTenantId, parentClientId, roleNames, dryRun, cancellationToken);
     }
 
     private sealed class CapturingLoggerProvider : ILoggerProvider

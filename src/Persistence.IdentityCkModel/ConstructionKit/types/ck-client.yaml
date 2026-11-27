@@ -173,6 +173,11 @@ types:
         name: ProvisionedByParentTenantId
         isOptional: true
 
+      # 3.9.0 (AB#9923): the roles the mirrors of this client get in the child tenants (row T1: optional attribute, Minor).
+      - id: ${this}/MirrorRoleNames
+        name: MirrorRoleNames
+        isOptional: true
+
       - id: ${this}/DynamicRegistration
         name: DynamicRegistration
       - id: ${this}/DynamicRegistrationExpiresAt
@@ -379,6 +384,28 @@ types:
           dataAccess: Write
         execution:
           timeoutSeconds: 30
+          idempotent: true
+      # 3.9.0 (AB#9923): the roles the mirrors of the client get in every child tenant. Stricter than AddRole-1 (TenantManagement
+      # only, not UserManagement), because the effect reaches every child tenant, also future ones. The handler also refuses a
+      # deny-listed role (MIRROR_ROLE_NOT_ALLOWED), a public client or one without client_credentials (CLIENT_NOT_CONFIDENTIAL),
+      # a mirror as target, a built-in role the caller does not hold and the caller's own client (METHOD_FORBIDDEN).
+      - methodId: SetMirrorRoles-1
+        description: "Sets the roles identity assigns to every tracked mirror of the client in its child tenants and reconciles the existing mirrors: listed roles are added (a listed role a mirror already holds becomes managed), roles identity managed and the list no longer names are removed, roles set by hand are left alone. dryRun returns the same per-tenant plan and writes nothing."
+        parameters:
+          - { name: roleNames, valueType: StringArray, description: "The complete list of role names; an empty list removes every role identity manages on the mirrors." }
+          - { name: dryRun, valueType: Boolean, isOptional: true, description: "true: compute the plan per child tenant and write nothing. Omitted is false." }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/ClientMirrorRolesResult
+        errors:
+          - { code: MIRROR_ROLE_NOT_ALLOWED, description: "A role of the list may never be mirrored (TenantManagement, UserManagement, SecretManagement, AdminPanelManagement, AiBudgetAdmin)." }
+          - { code: CLIENT_NOT_CONFIDENTIAL, description: "Only a confidential client with the grant type client_credentials may hand roles to its mirrors." }
+          - { code: CONCURRENT_CHANGE, description: "The client was changed concurrently by other requests; retry." }
+        authorization:
+          roles: [ TenantManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 300
           idempotent: true
       # 3.8.0: create, update and delete of the client run as methods (REST parity: ClientsController POST/PUT/DELETE,
       # IdentityTenantAdministrationWritePolicy = TenantManagement or UserManagement; a client secret in the parameters also

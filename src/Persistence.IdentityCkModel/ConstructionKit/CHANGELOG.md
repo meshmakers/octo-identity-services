@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.9.0 - 2026-11-27
+
+_Required bump level: minor._
+
+System.Identity 3.9.0 lets a client hand roles to its mirrors in the child tenants (AB#9923): the original carries the allow-list
+`Client.MirrorRoleNames`, the tracking row `ClientMirror` records what identity assigned on each mirror, and `Client.SetMirrorRoles-1`
+sets the list (with a dry run) and reconciles the mirrors. With the default empty list nothing changes for any existing client or
+mirror. Compile gate against 3.8.0: required level MINOR, nothing to acknowledge.
+
+Rollout: service-managed - ships inside the identity service with the regular identity release train. No catalog import, no per-tenant
+step, **no FixAll**. No data migration; ranges `System.Identity-[3.0.0,4.0)` stay satisfied.
+
+### Added
+
+- Optional attribute 'Client.MirrorRoleNames' (StringArray, TenantOwned) _(minor)_
+- Optional attributes 'ClientMirror.ManagedRoleNames', 'ClientMirror.DeclinedRoleNames' (StringArray) and 'ClientMirror.ManagedMirrorRtId' (String) _(minor)_
+- Method 'Client.SetMirrorRoles-1' (roles TenantManagement; errors MIRROR_ROLE_NOT_ALLOWED, CLIENT_NOT_CONFIDENTIAL, CONCURRENT_CHANGE) _(minor)_
+- Records 'ClientMirrorRolesResult', 'ClientMirrorRoleTenantResult' and their RuntimeState member attributes _(minor)_
+
 ## 3.8.0 - 2026-11-18
 
 _Required bump level: minor._

@@ -1,0 +1,36 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+# 3.9.0 (AB#9923): the result records of Client.SetMirrorRoles-1. They take the ckLanguage 2 default `derivable: Model`:
+# answers, not extension points.
+records:
+  - recordId: ClientMirrorRolesResult
+    description: "Result of Client.SetMirrorRoles: the role list and one entry per tracked mirror of the client."
+    isFinal: true
+    attributes:
+      - id: ${this}/MirrorRolesResultRoleNames
+        name: RoleNames
+      - id: ${this}/MirrorRolesResultDryRun
+        name: DryRun
+      - id: ${this}/MirrorRolesResultTenants
+        name: Tenants
+  - recordId: ClientMirrorRoleTenantResult
+    description: "One mirror of a Client.SetMirrorRoles result: what was (or would be) changed in its child tenant."
+    isFinal: true
+    attributes:
+      - id: ${this}/MirrorRoleTenantChildTenantId
+        name: ChildTenantId
+      - id: ${this}/MirrorRoleTenantOutcome
+        name: Outcome
+      - id: ${this}/MirrorRoleTenantAdded
+        name: Added
+      - id: ${this}/MirrorRoleTenantRemoved
+        name: Removed
+      - id: ${this}/MirrorRoleTenantAlreadyPresent
+        name: AlreadyPresent
+      - id: ${this}/MirrorRoleTenantAdopted
+        name: Adopted
+      - id: ${this}/MirrorRoleTenantHandSet
+        name: HandSet
+      - id: ${this}/MirrorRoleTenantRoleMissing
+        name: RoleMissing
+      - id: ${this}/MirrorRoleTenantDeclined
+        name: Declined
