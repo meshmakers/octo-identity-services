@@ -1267,8 +1267,10 @@ public class ClientMirrorProvisioningService(
                 childRepos[row.ChildTenantId] = childRepo;
             }
 
+            // A dry run plans with the requested list; a real run reads the stored list inside the per-mirror lock, so a
+            // second administrator's later list is never overwritten by this call's older one.
             tenants.Add(await Roles.ReconcileAsync(parentRepo, parentSession, parentTenantId, parentClientId,
-                row.ChildTenantId, childRepo, normalized, dryRun));
+                row.ChildTenantId, childRepo, dryRun ? normalized : null, dryRun));
         }
 
         return new ClientMirrorRolesResult(normalized, dryRun, tenants);

@@ -436,7 +436,7 @@ internal sealed class ClientSetMirrorAutoProvisionHandler(IServiceProvider servi
 
 /// <summary>
 ///     Handler of <c>System.Identity/Client.SetMirrorRoles-1</c> (System.Identity 3.9.0): sets the roles the mirrors
-///     of the client get in every child tenant and reconciles the tracked mirrors. No REST facade (Epic methods only).
+///     of the client get in every child tenant and reconciles the tracked mirrors. No REST facade (methods only).
 /// </summary>
 /// <remarks>
 ///     <para>

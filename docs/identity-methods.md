@@ -301,7 +301,7 @@ Declared role `TenantManagement` only, `dataAccess: Write`, idempotent, 300 s.
 
 | Parameter | Meaning |
 |---|---|
-| `roleNames` (StringArray) | The complete list; trimmed, distinct (case-insensitive), at most 32 names. Empty clears the list and removes every role identity manages on the mirrors. |
+| `roleNames` (StringArray, required) | The complete list; trimmed, distinct (case-insensitive), at most 32 names. Empty clears the list and removes every role identity manages on the mirrors; omitted is `METHOD_VALIDATION_FAILED` (never read as "clear"). |
 | `dryRun` (Boolean, optional, omitted = false) | `true`: the same per-tenant plan, nothing is written anywhere (neither the list nor a mirror nor a tracking row). |
 
 Result `ClientMirrorRolesResult`: `roleNames`, `dryRun`, `tenants[]` (`ClientMirrorRoleTenantResult` per tracked mirror: `childTenantId`,
@@ -324,7 +324,11 @@ Order of checks, each refusal writes nothing:
 8. The role change guard for every name the list **adds** compared with the stored list (`IRoleChangeGuard.EvaluateClientGrantAsync`): a built-in
    role the caller does not hold -> `METHOD_FORBIDDEN` / `role-not-held`; a client-credentials caller extending its own client's list ->
    `METHOD_FORBIDDEN` / `self-grant`.
-9. A concurrent change of the client -> `CONCURRENT_CHANGE`.
+9. A concurrent change of the client, or a stored list that is no longer the one the guard of step 8 judged against (another
+   administrator changed it in between) -> `CONCURRENT_CHANGE`; nothing is written.
+
+A real run reconciles each mirror from the list stored at that moment (read inside the per-mirror lock), a dry run from the
+requested list.
 
 Audit: one `Identity.Method` event per call with `clientId`, `roleNames`, `dryRun`, `mirrors`, `failed` and `reason` on a refusal; every grant,
 removal, adoption and decline on a mirror is also an information event in the child tenant (and in the system event log), see
