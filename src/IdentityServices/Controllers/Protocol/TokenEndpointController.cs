@@ -62,6 +62,15 @@ public class TokenEndpointController(
         var request = HttpContext.GetOpenIddictServerRequest() ??
                       throw new InvalidOperationException("The OpenIddict request cannot be retrieved.");
 
+        // AB#6054: every token an agent client gets carries octo_agent, so every OctoMesh API but the MCP agent endpoint
+        // can refuse it. The class is closed here, for every grant type: an agent client gets tokens only through
+        // client_credentials (where octo_agent is always added), and only with the scope octo_agent.
+        var agentRefusal = await RefuseAgentClientGrantAsync(request);
+        if (agentRefusal != null)
+        {
+            return agentRefusal;
+        }
+
         if (request.IsClientCredentialsGrantType())
         {
             return await HandleClientCredentialsAsync(request);
@@ -89,6 +98,44 @@ public class TokenEndpointController(
         }
 
         return ForbidWithError(Errors.UnsupportedGrantType, "The specified grant type is not supported.");
+    }
+
+    /// <summary>
+    ///     AB#6054: the token rules of an agent client (a client whose allowed scopes contain <c>octo_agent</c>). It gets
+    ///     tokens only through <c>client_credentials</c> (any other grant type - token exchange, on-behalf-of,
+    ///     impersonation, authorization code, device code, refresh token - is refused with <c>unauthorized_client</c>,
+    ///     even when an administrator allowed it on the client), and it requests no scope but <c>octo_agent</c>
+    ///     (<c>invalid_scope</c>, e.g. for <c>octo_agent octo_api</c>). Returns <c>null</c> when the request may go on.
+    /// </summary>
+    private async Task<IActionResult?> RefuseAgentClientGrantAsync(OpenIddictRequest request)
+    {
+        if (string.IsNullOrEmpty(request.ClientId))
+        {
+            return null;
+        }
+
+        var client = await clientStore.FindRtClientByIdAsync(request.ClientId);
+        if (client?.AllowedScopes?.Contains(AgentExchangeConstants.AgentScope, StringComparer.Ordinal) != true)
+        {
+            return null;
+        }
+
+        if (!request.IsClientCredentialsGrantType())
+        {
+            logger.LogWarning("Token request of agent client {ClientId} refused: grant type {GrantType} (AB#6054)",
+                request.ClientId, request.GrantType);
+            return ForbidWithError(Errors.UnauthorizedClient,
+                "an agent client gets tokens only through client_credentials");
+        }
+
+        if (request.GetScopes().Any(scope => !string.Equals(scope, AgentExchangeConstants.AgentScope, StringComparison.Ordinal)))
+        {
+            logger.LogWarning("Token request of agent client {ClientId} refused: a scope other than octo_agent (AB#6054)",
+                request.ClientId);
+            return ForbidWithError(Errors.InvalidScope, "an agent client requests no scope but octo_agent");
+        }
+
+        return null;
     }
 
     private async Task<IActionResult> HandleClientCredentialsAsync(OpenIddictRequest request)
@@ -130,6 +177,16 @@ public class TokenEndpointController(
         await tokenClaimsService.PopulateClientClaimsAsync(identity, client);
 
         var scopes = request.GetScopes();
+        // AB#6054: a token of an agent client always carries octo_agent, also when the request named no scope. Every
+        // OctoMesh API but the MCP agent endpoint refuses a token with octo_agent (403 AgentTokenNotAccepted); a
+        // scope-less agent token would carry nothing to refuse and could read where no scope is required (GraphQL
+        // queries of the asset repository).
+        if (client.AllowedScopes?.Contains(AgentExchangeConstants.AgentScope, StringComparer.Ordinal) == true &&
+            !scopes.Contains(AgentExchangeConstants.AgentScope, StringComparer.Ordinal))
+        {
+            scopes = scopes.Add(AgentExchangeConstants.AgentScope);
+        }
+
         identity.SetScopes(scopes);
         identity.SetResources(await tokenClaimsService.ResolveAudiencesAsync(scopes));
         identity.SetDestinations(OctoClaimsDestinations.Resolve);

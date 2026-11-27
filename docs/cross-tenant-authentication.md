@@ -243,8 +243,17 @@ Tests: `ServiceAccountExchangeGateIntegrationTests` (every rule against MongoDB)
 
 An agent's service-account client (created by MCP's `create_agent`) holds the API scope `octo_agent` instead of
 `octo_api`. The scope is attached to the MCP resource indicator only (`mcpApi`, System.Identity.Bootstrap 1.12.0), so a
-token of the agent opens no platform API: every API requires `octo_api`. MCP accepts the token only from a client that is
-an agent of the token's tenant and, for every downstream call, exchanges it for a short-lived `octo_api` token.
+token of the agent opens no platform API: every OctoMesh API but the MCP agent endpoint refuses a token whose scope
+contains `octo_agent` with `403 AgentTokenNotAccepted` (octo-common-services `UseOctoTenantAuthorization()`, AB#6054;
+not every API requires `octo_api`, so the agent scope is refused instead). MCP accepts the token only from a client that
+is an agent of the token's tenant and, for every downstream call, exchanges it for a short-lived `octo_api` token.
+
+**Tokens of an agent client (AB#6054).** A client whose allowed scopes contain `octo_agent` gets tokens only through
+`client_credentials`, and every such token carries `octo_agent` (added when the request names no scope), so the
+refusal above always sees it. The token endpoint refuses it every other grant type (token exchange, on-behalf-of,
+impersonation, authorization code, device code, refresh token) with `unauthorized_client`, also when an administrator
+allowed the grant on the client, and any scope but `octo_agent` (for example `octo_agent octo_api` or `offline_access`)
+with `invalid_scope`.
 
 **Request** (`POST /connect/token`, form): `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`,
 `client_id=octo-mcpServices-agent-exchange` with its `client_secret`, `subject_token` = the agent token,
@@ -266,10 +275,9 @@ closed, each refusal writes the `Token Exchange Failure` audit event):
 | a scope other than `octo_api` is requested | `invalid_scope` |
 
 The agent rules run before the service-account rules (previous section), so an agent token never reaches a parent, sibling or
-child tenant through a shadow client. An agent may request its token without any scope, so the token carries no
-`octo_agent`; the service-account gate therefore also refuses every subject client whose registration allows
-`octo_agent` (refusal `AgentClient`). Such a scope-less token opens nothing either: it has no `octo_api` for the platform
-APIs and no `octo_agent` for MCP.
+child tenant through a shadow client. The service-account gate also refuses every subject client whose registration
+allows `octo_agent` (refusal `AgentClient`), whatever scope its token carries. Since AB#6054 an agent client's token
+always carries `octo_agent` (see above), so a scope-less agent token no longer exists.
 
 The refusals the token endpoint decides against the directory (presenting client, requested scope, agent client) write
 the `Token Exchange Failure` audit event like the refusals of the processor.

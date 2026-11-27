@@ -36,6 +36,11 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Security
 
+- **Every token of an agent client carries `octo_agent` (AB#6054).** A client whose allowed scopes contain
+  `octo_agent` gets tokens only through `client_credentials`; `octo_agent` is added when the request names no scope;
+  any other grant type is refused with `unauthorized_client` and any other scope with `invalid_scope`. Together with
+  the `403 AgentTokenNotAccepted` of octo-common-services an agent token reaches no OctoMesh API but the MCP agent
+  endpoint. Tests: `AgentTokenExchangeHttpTests`. Docs: `docs/cross-tenant-authentication.md`.
 - **Token exchange for service-account subjects (AB#9777).** A client-credentials token of tenant T can be exchanged
   into T's registry parent, sibling (same parent, not the system tenant) or child U, presented by U's own public shadow
   client `xt_{T}_{clientId}` (token-exchange grant only). The issued token is client-shaped for the shadow client

@@ -30,6 +30,7 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
 {
     private const string AgentScope = "octo_agent";
     private const string ApiScope = "octo_api";
+    private const string ReadOnlyApiScope = "octo_api.read_only";
     private const string ExchangeClientId = "octo-mcpServices-agent-exchange";
     private const string ExchangeSecret = "agent-xchg-exchange-secret";
     private const string AgentClientId = "agent-xchg-builder";
@@ -97,6 +98,120 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
 
     private void ShouldBeAudited(string reasonPart) =>
         _audit.Received().StoreFailureAsync("Token Exchange Failure", Arg.Is<string>(m => m.Contains(reasonPart)));
+
+    /// <summary>
+    ///     AB#6054: a token of an agent client always carries <c>octo_agent</c>, also when the request names no scope. Every
+    ///     OctoMesh API but the MCP agent endpoint refuses a token with that scope; a scope-less agent token would carry
+    ///     nothing to refuse and could read where no scope is required.
+    /// </summary>
+    [Fact]
+    public async Task AgentTokenRequestedWithoutScope_StillCarriesTheAgentScope()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeAsync(exchangeClientConfidential: true);
+
+        var token = await RequestAgentTokenAsync(ct, scope: null);
+
+        new JsonWebToken(token).Claims.Where(c => c.Type == "scope").Select(c => c.Value).Should()
+            .BeEquivalentTo([AgentScope]);
+    }
+
+    /// <summary>
+    ///     AB#6054: an agent client requests no scope but <c>octo_agent</c>; <c>octo_agent octo_api</c> is refused even when
+    ///     an administrator added <c>octo_api</c> to the client's allowed scopes.
+    /// </summary>
+    [Fact]
+    public async Task AgentClientRequestingOctoAgentAndOctoApi_IsRefused_InvalidScope()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeAsync(exchangeClientConfidential: true);
+        await AllowOnTheAgentClientAsync(grantTypes: [], scopes: [ApiScope]);
+
+        var (status, body) = await RequestAsAgentClientAsync(new Dictionary<string, string>
+        {
+            ["grant_type"] = "client_credentials",
+            ["scope"] = $"{AgentScope} {ApiScope}"
+        }, ct);
+
+        status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
+        body["error"]!.GetValue<string>().Should().Be("invalid_scope");
+        body.ContainsKey("access_token").Should().BeFalse();
+    }
+
+    /// <summary>
+    ///     AB#6054: an agent client gets tokens only through client_credentials. Every other grant type the token endpoint
+    ///     serves is refused with <c>unauthorized_client</c> before a token is composed, even when an administrator allowed
+    ///     it on the client: token exchange (the agent client presenting a token, e.g. through the octo-cli exchange),
+    ///     on-behalf-of and impersonation.
+    /// </summary>
+    [Theory]
+    [InlineData(TokenExchange)]
+    [InlineData("urn:meshmakers:params:oauth:grant-type:on-behalf-of")]
+    [InlineData("urn:meshmakers:params:oauth:grant-type:impersonate")]
+    public async Task AgentClient_AnyGrantButClientCredentials_IsRefused_UnauthorizedClient(string grantType)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeAsync(exchangeClientConfidential: true);
+        await AllowOnTheAgentClientAsync(grantTypes: [grantType], scopes: [ApiScope]);
+        var agentToken = await RequestAgentTokenAsync(ct);
+
+        var (status, body) = await RequestAsAgentClientAsync(new Dictionary<string, string>
+        {
+            ["grant_type"] = grantType,
+            ["subject_token"] = agentToken,
+            ["subject_token_type"] = "urn:ietf:params:oauth:token-type:access_token",
+            ["scope"] = ApiScope
+        }, ct);
+
+        status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
+        body["error"]!.GetValue<string>().Should().Be("unauthorized_client");
+        body.ContainsKey("access_token").Should().BeFalse();
+    }
+
+    /// <summary>
+    ///     AB#6054: the user grants (authorization code, device code, refresh token) need a code or refresh token the
+    ///     identity service issued to the client; an agent client never gets one through client_credentials (no refresh
+    ///     token, no user session). Allowed on the client by an administrator, a request with a fabricated value is refused
+    ///     and yields no token; a genuine code would reach the controller and be refused there (unauthorized_client).
+    /// </summary>
+    [Theory]
+    [InlineData("authorization_code", "code")]
+    [InlineData("urn:ietf:params:oauth:grant-type:device_code", "device_code")]
+    [InlineData("refresh_token", "refresh_token")]
+    public async Task AgentClient_UserGrants_YieldNoToken(string grantType, string parameter)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeAsync(exchangeClientConfidential: true);
+        await AllowOnTheAgentClientAsync(grantTypes: [grantType], scopes: []);
+
+        var (status, body) = await RequestAsAgentClientAsync(new Dictionary<string, string>
+        {
+            ["grant_type"] = grantType,
+            [parameter] = "fabricated-value",
+            ["redirect_uri"] = "https://localhost/callback"
+        }, ct);
+
+        status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
+        body.ContainsKey("access_token").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AgentClientCredentialsToken_DoesNotCarryARefreshToken()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeAsync(exchangeClientConfidential: true);
+        await AllowOnTheAgentClientAsync(grantTypes: ["refresh_token"], scopes: []);
+
+        var (status, body) = await RequestAsAgentClientAsync(new Dictionary<string, string>
+        {
+            ["grant_type"] = "client_credentials",
+            ["scope"] = $"{AgentScope} offline_access"
+        }, ct);
+
+        // offline_access is a scope other than octo_agent: refused, so no refresh token can ever be obtained.
+        status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
+        body.ContainsKey("refresh_token").Should().BeFalse();
+    }
 
     [Fact]
     public async Task AgentToken_ExchangedByTheConfidentialExchangeClient_IsAnOctoApiTokenOfTheAgent_WithAct()
@@ -226,15 +341,34 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
     public async Task AScopeOtherThanOctoApi_IsRefused()
     {
         var ct = TestContext.Current.CancellationToken;
-        await ArrangeAsync(exchangeClientConfidential: true, extraScope: AgentScope);
+        await ArrangeAsync(exchangeClientConfidential: true, extraScope: ReadOnlyApiScope);
         var agentToken = await RequestAgentTokenAsync(ct);
 
         var (status, body) = await ExchangeAsync(ExchangeClientId, ExchangeSecret, agentToken, ct,
-            scope: $"{ApiScope} {AgentScope}");
+            scope: $"{ApiScope} {ReadOnlyApiScope}");
 
         status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
         body["error"]!.GetValue<string>().Should().Be("invalid_scope");
         ShouldBeAudited("a scope other than octo_api");
+    }
+
+    /// <summary>
+    ///     AB#6054: a client allowed to request <c>octo_agent</c> is an agent client, also when it carries the exchange
+    ///     client's id; an agent client gets tokens only through client_credentials, so its exchange is refused before
+    ///     the exchange rules run.
+    /// </summary>
+    [Fact]
+    public async Task ExchangeClientThatMayRequestTheAgentScope_IsAnAgentClient_AndIsRefused()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeAsync(exchangeClientConfidential: true, extraScope: AgentScope);
+        var agentToken = await RequestAgentTokenAsync(ct);
+
+        var (status, body) = await ExchangeAsync(ExchangeClientId, ExchangeSecret, agentToken, ct);
+
+        status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
+        body["error"]!.GetValue<string>().Should().Be("unauthorized_client");
+        body.ContainsKey("access_token").Should().BeFalse();
     }
 
     // ---------- arrangement ----------
@@ -248,7 +382,7 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
         using (var scope = _host.Services.CreateScope())
         {
             var resourceStore = scope.ServiceProvider.GetRequiredService<IOctoResourceStore>();
-            foreach (var name in new[] { AgentScope, ApiScope })
+            foreach (var name in new[] { AgentScope, ApiScope, extraScope ?? ApiScope }.Distinct())
             {
                 if (await resourceStore.GetApiScopeByNameAsync(name) == null)
                 {
@@ -299,6 +433,31 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
         });
     }
 
+    private async Task AllowOnTheAgentClientAsync(string[] grantTypes, string[] scopes)
+    {
+        using var scope = _host.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IOctoClientStore>().MutateAsync(AgentClientId, c =>
+        {
+            c.AllowedGrantTypes = new AttributeStringValueList(
+                (c.AllowedGrantTypes ?? Enumerable.Empty<string>()).Concat(grantTypes).Distinct().ToList());
+            c.AllowedScopes = new AttributeStringValueList(
+                (c.AllowedScopes ?? Enumerable.Empty<string>()).Concat(scopes).Distinct().ToList());
+            return true;
+        });
+    }
+
+    private async Task<(HttpStatusCode Status, JsonObject Body)> RequestAsAgentClientAsync(
+        Dictionary<string, string> form, CancellationToken ct)
+    {
+        using var http = _host.CreateClient();
+        form["client_id"] = AgentClientId;
+        form["client_secret"] = AgentSecret;
+        form["acr_values"] = $"tenant:{NormalizedSystemTenantId}";
+        var response = await http.PostAsync("/connect/token", new FormUrlEncodedContent(form), ct);
+        var raw = await response.Content.ReadAsStringAsync(ct);
+        return (response.StatusCode, JsonNode.Parse(raw)!.AsObject());
+    }
+
     private async Task SetAgentEnabledAsync(bool enabled)
     {
         using var scope = _host.Services.CreateScope();
@@ -347,18 +506,22 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
         }
     }
 
-    private async Task<string> RequestAgentTokenAsync(CancellationToken ct)
+    private async Task<string> RequestAgentTokenAsync(CancellationToken ct, string? scope = AgentScope)
     {
         using var http = _host.CreateClient();
-        var response = await http.PostAsync("/connect/token", new FormUrlEncodedContent(
-            new Dictionary<string, string>
-            {
-                ["grant_type"] = "client_credentials",
-                ["client_id"] = AgentClientId,
-                ["client_secret"] = AgentSecret,
-                ["scope"] = AgentScope,
-                ["acr_values"] = $"tenant:{NormalizedSystemTenantId}"
-            }), ct);
+        var form = new Dictionary<string, string>
+        {
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = AgentClientId,
+            ["client_secret"] = AgentSecret,
+            ["acr_values"] = $"tenant:{NormalizedSystemTenantId}"
+        };
+        if (scope != null)
+        {
+            form["scope"] = scope;
+        }
+
+        var response = await http.PostAsync("/connect/token", new FormUrlEncodedContent(form), ct);
         var raw = await response.Content.ReadAsStringAsync(ct);
         response.StatusCode.Should().Be(HttpStatusCode.OK, "the agent token could not be minted: {0}", raw);
         var token = JsonNode.Parse(raw)!["access_token"]!.GetValue<string>();
