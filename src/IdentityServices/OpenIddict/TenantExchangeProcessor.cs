@@ -588,7 +588,10 @@ public class TenantExchangeProcessor(
             $"{ShadowClientInvalidMarker}: {decision.Reason}"),
         ServiceAccountExchangeRefusal.NotPermitted => ExchangeOutcome.Failed(Errors.AccessDenied,
             $"{GrantNotPermittedMarker}: the source tenant does not permit access to tenant '{targetTenantId}'"),
-        ServiceAccountExchangeRefusal.StateUnreadable => ExchangeOutcome.Failed(Errors.AccessDenied,
+        // Not a refusal: the gate could not read its own state (registry, allow-list, directory). The token endpoint answers
+        // temporarily_unavailable with HTTP 503 (TokenEndpointController), so a caller (the mesh adapter's cross-tenant guard) treats it as an
+        // outage and does not drop the target as refused.
+        ServiceAccountExchangeRefusal.StateUnreadable => ExchangeOutcome.Failed(Errors.TemporarilyUnavailable,
             "the service-account exchange could not be checked; try again later"),
         _ => ExchangeOutcome.Failed(Errors.UnauthorizedClient, "cross-tenant access to the target tenant is denied")
     };
