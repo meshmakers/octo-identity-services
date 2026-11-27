@@ -100,7 +100,7 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
         _audit.Received().StoreFailureAsync("Token Exchange Failure", Arg.Is<string>(m => m.Contains(reasonPart)));
 
     /// <summary>
-    ///     AB#6054: a token of an agent client always carries <c>octo_agent</c>, also when the request names no scope. Every
+    ///     A token of an agent client always carries <c>octo_agent</c>, also when the request names no scope. Every
     ///     OctoMesh API but the MCP agent endpoint refuses a token with that scope; a scope-less agent token would carry
     ///     nothing to refuse and could read where no scope is required.
     /// </summary>
@@ -117,7 +117,7 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
     }
 
     /// <summary>
-    ///     AB#6054: an agent client requests no scope but <c>octo_agent</c>; <c>octo_agent octo_api</c> is refused even when
+    ///     An agent client requests no scope but <c>octo_agent</c>; <c>octo_agent octo_api</c> is refused even when
     ///     an administrator added <c>octo_api</c> to the client's allowed scopes.
     /// </summary>
     [Fact]
@@ -136,10 +136,11 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
         status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
         body["error"]!.GetValue<string>().Should().Be("invalid_scope");
         body.ContainsKey("access_token").Should().BeFalse();
+        ShouldBeAudited("a scope other than octo_agent");
     }
 
     /// <summary>
-    ///     AB#6054: an agent client gets tokens only through client_credentials. Every other grant type the token endpoint
+    ///     An agent client gets tokens only through client_credentials. Every other grant type the token endpoint
     ///     serves is refused with <c>unauthorized_client</c> before a token is composed, even when an administrator allowed
     ///     it on the client: token exchange (the agent client presenting a token, e.g. through the octo-cli exchange),
     ///     on-behalf-of and impersonation.
@@ -166,10 +167,53 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
         status.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
         body["error"]!.GetValue<string>().Should().Be("unauthorized_client");
         body.ContainsKey("access_token").Should().BeFalse();
+        ShouldBeAudited("only through client_credentials");
     }
 
     /// <summary>
-    ///     AB#6054: the user grants (authorization code, device code, refresh token) need a code or refresh token the
+    ///     No other client gets a token as an agent client: an on-behalf-of or impersonation request whose
+    ///     <c>requested_client_id</c> names an agent client is refused with <c>unauthorized_client</c> before any
+    ///     MayActAs edge is looked at, and the refusal is audited.
+    /// </summary>
+    [Theory]
+    [InlineData("urn:meshmakers:params:oauth:grant-type:on-behalf-of")]
+    [InlineData("urn:meshmakers:params:oauth:grant-type:impersonate")]
+    public async Task OtherClient_AskingForATokenAsTheAgentClient_IsRefused_UnauthorizedClient(string grantType)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ArrangeAsync(exchangeClientConfidential: true);
+        const string otherClientId = "agent-xchg-other";
+        const string otherSecret = "agent-xchg-other-secret";
+        await CreateClientAsync(otherClientId, b => b
+            .WithGrantTypes(grantType)
+            .WithScopes(ApiScope)
+            .WithSecret("SharedSecret", Hash(otherSecret))
+            .RequireClientSecret()
+            .RequirePkce(false));
+        var agentToken = await RequestAgentTokenAsync(ct);
+
+        using var http = _host.CreateClient();
+        var response = await http.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = grantType,
+            ["client_id"] = otherClientId,
+            ["client_secret"] = otherSecret,
+            ["subject_token"] = agentToken,
+            ["subject_token_type"] = "urn:ietf:params:oauth:token-type:access_token",
+            ["requested_client_id"] = AgentClientId,
+            ["scope"] = ApiScope,
+            ["acr_values"] = $"tenant:{NormalizedSystemTenantId}"
+        }), ct);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!.AsObject();
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "{0}", body.ToJsonString());
+        body["error"]!.GetValue<string>().Should().Be("unauthorized_client");
+        body.ContainsKey("access_token").Should().BeFalse();
+        ShouldBeAudited("asked for a token as the agent client");
+    }
+
+    /// <summary>
+    ///     The user grants (authorization code, device code, refresh token) need a code or refresh token the
     ///     identity service issued to the client; an agent client never gets one through client_credentials (no refresh
     ///     token, no user session). Allowed on the client by an administrator, a request with a fabricated value is refused
     ///     and yields no token; a genuine code would reach the controller and be refused there (unauthorized_client).
@@ -353,7 +397,7 @@ public sealed class AgentTokenExchangeHttpTests : IntegrationTestBase, IAsyncLif
     }
 
     /// <summary>
-    ///     AB#6054: a client allowed to request <c>octo_agent</c> is an agent client, also when it carries the exchange
+    ///     A client allowed to request <c>octo_agent</c> is an agent client, also when it carries the exchange
     ///     client's id; an agent client gets tokens only through client_credentials, so its exchange is refused before
     ///     the exchange rules run.
     /// </summary>
