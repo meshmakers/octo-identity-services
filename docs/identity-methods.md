@@ -292,11 +292,11 @@ the REST facade, a bus or GraphQL call without `SecretManagement` is refused); `
 - REST facades and parity table: `docs/identity-rest-facades.md`. Tests: `Api/TenantApi/ClientMirrorRestMethodFacadeTests`,
   `Controllers/ClientMirrorControllerTests`, `Methods/IdentityMethodHostTests`, `Persistence/IdentityMethodDeclarationsIntegrationTests`.
 
-## `Client.SetMirrorRoles` (System.Identity 3.9.0, AB#9923)
+## `Client.SetMirrorRoles` (System.Identity 3.9.0)
 
 Instance method on the **original** client: sets `Client.MirrorRoleNames` (the roles identity assigns to every tracked mirror of the
 client in its child tenants) and reconciles the existing mirrors (`ClientSetMirrorRolesHandler` in `Methods/ClientMirrorHandlers.cs`, logic
-in `IClientMirrorProvisioningService.SetMirrorRolesAsync` and `ClientMirrorRoles.cs`). No REST facade (methods only, Epic AB#9221).
+in `IClientMirrorProvisioningService.SetMirrorRolesAsync` and `ClientMirrorRoles.cs`). No REST facade (methods only).
 Declared role `TenantManagement` only, `dataAccess: Write`, idempotent, 300 s.
 
 | Parameter | Meaning |

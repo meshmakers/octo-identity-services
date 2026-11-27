@@ -32,7 +32,7 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Api.Methods;
 
 /// <summary>
-///     AB#9923: <c>Client.SetMirrorRoles-1</c> on the real host - the caller rule (TenantManagement in the tenant of the
+///     <c>Client.SetMirrorRoles-1</c> on the real host - the caller rule (TenantManagement in the tenant of the
 ///     original), the deny-list, confidential clients only, a mirror as target, the role change guard (role not held,
 ///     self-grant), the dry run, one audit event per call, and the effect on the wire: the mirror's client-credentials token
 ///     in a child carries the mirrored role and passes the method authorization there, the same client gains nothing in a
@@ -91,6 +91,19 @@ public class ClientSetMirrorRolesMethodTests : IntegrationTestBase, IDisposable
         (await MirrorRoleNamesAsync(child, client.ClientId)).Should().Equal(Deploy);
         _audit.For(client.RtId.ToString()).Should().ContainSingle("one Identity.Method event per call")
             .Which.Details!["roleNames"].Should().Be(Deploy);
+    }
+
+    [Fact]
+    public async Task OmittedRoleNames_IsAValidationFailure_NeverAClearedList()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateClientAsync();
+        (await SetAsync(client, [Deploy], Admin(Deploy), ct)).IsSuccess.Should().BeTrue();
+
+        var outcome = await SetAsync(client, null, Admin(Deploy), ct);
+
+        outcome.Failure!.Code.Should().Be(CkMethodErrorCodes.MethodValidationFailed);
+        (await StoredListAsync(client.ClientId)).Should().Equal(Deploy);
     }
 
     [Fact]
@@ -221,7 +234,7 @@ public class ClientSetMirrorRolesMethodTests : IntegrationTestBase, IDisposable
     }
 
     /// <summary>
-    ///     The tokens on the wire (AB#8711 patterns): the mirror's client-credentials token in a child carries the mirrored
+    ///     The tokens on the wire: the mirror's client-credentials token in a child carries the mirrored
     ///     role and passes a method that declares it; the same client's token in a child that declined the role is refused
     ///     (<c>METHOD_FORBIDDEN</c>); the original's token of the system tenant gains nothing in a child (wrong tenant).
     /// </summary>
@@ -262,7 +275,7 @@ public class ClientSetMirrorRolesMethodTests : IntegrationTestBase, IDisposable
     private CkMethodPrincipal Admin(params string[] extraRoles) =>
         new(AdminSubject, ["TenantManagement", .. extraRoles], [ApiScope], null, NormalizedSystemTenantId);
 
-    private async Task<CkMethodOutcome<ClientSetMirrorRolesResult>> SetAsync(RtClient client, string[] roleNames,
+    private async Task<CkMethodOutcome<ClientSetMirrorRolesResult>> SetAsync(RtClient client, string[]? roleNames,
         CkMethodPrincipal caller, CancellationToken ct, bool dryRun = false, string? tenantId = null)
     {
         using var scope = _host.Services.CreateScope();
@@ -272,7 +285,7 @@ public class ClientSetMirrorRolesMethodTests : IntegrationTestBase, IDisposable
                 tenantId ?? NormalizedSystemTenantId),
             new ClientSetMirrorRolesParameters
             {
-                RoleNames = roleNames.ToList(), DryRun = dryRun
+                RoleNames = roleNames?.ToList()!, DryRun = dryRun
             }) { CallerPrincipal = caller };
         return await handler.HandleAsync(context, ct);
     }

@@ -1,5 +1,5 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
-# 3.9.0 (AB#9923, Feature F5.3) lets a client hand roles to its mirrors in the child tenants:
+# 3.9.0 (Feature F5.3) lets a client hand roles to its mirrors in the child tenants:
 #   * optional attribute Client.MirrorRoleNames (StringArray, TenantOwned, default empty) - the allow-list on the original;
 #   * optional attributes ClientMirror.ManagedRoleNames, DeclinedRoleNames and ManagedMirrorRtId - what identity assigned on
 #     the mirror, what the child tenant's administrator removed, and the mirror rtId both refer to;

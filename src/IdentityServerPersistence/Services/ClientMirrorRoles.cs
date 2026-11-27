@@ -15,7 +15,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 namespace IdentityServerPersistence.Services;
 
 /// <summary>
-///     The rules of the mirror role list (AB#9923, System.Identity 3.9.0): which roles of
+///     The rules of the mirror role list (System.Identity 3.9.0): which roles of
 ///     <c>Client.MirrorRoleNames</c> may be mirrored and which clients may carry a list.
 /// </summary>
 public static class ClientMirrorRoleRules
@@ -24,7 +24,7 @@ public static class ClientMirrorRoleRules
     public const string ClientCredentialsGrantType = "client_credentials";
 
     /// <summary>
-    ///     Roles that are never mirrored (decided by Gerald 2026-11-28): they administer the tenant, its users, its secrets, the
+    ///     Roles that are never mirrored (decided by the platform owner): they administer the tenant, its users, its secrets, the
     ///     platform or the AI budget, so a mirrored copy would make one client an administrator of every child tenant.
     /// </summary>
     public static readonly IReadOnlySet<string> DeniedRoleNames = new HashSet<string>(
@@ -94,6 +94,13 @@ public static class ClientMirrorRoleRules
     }
 }
 
+/// <summary>
+///     The stored mirror role list of a client is not the one the caller judged its change against: another writer changed it
+///     in between. Nothing was written.
+/// </summary>
+public sealed class ClientMirrorRolesChangedException(string clientId)
+    : InvalidOperationException($"The mirror role list of client '{clientId}' was changed concurrently.");
+
 /// <summary>The per-mirror outcome of a role reconciliation.</summary>
 public enum MirrorRoleOutcome
 {
@@ -136,7 +143,7 @@ public sealed record ClientMirrorRolesResult(
     IReadOnlyList<MirrorRoleTenantResult> Tenants);
 
 /// <summary>
-///     The plan of one mirror: pure, so the rules are unit-tested without a database (AB#9923). All comparisons of role names
+///     The plan of one mirror: pure, so the rules are unit-tested without a database. All comparisons of role names
 ///     are case-insensitive (role names are normalized upper-case in the store).
 /// </summary>
 /// <param name="Add">Role names to assign (canonical spelling of the child's role).</param>
@@ -198,8 +205,10 @@ public sealed record MirrorRolePlan(
         // A declined role the mirror holds again was given back by the tenant: it is no longer declined.
         declinedSet.RemoveWhere(currentSet.Contains);
 
-        // A listed role identity managed and the mirror lost on the same mirror was removed by the tenant: declined.
-        var newlyDeclined = managedBefore.Where(r => desiredSet.Contains(r) && !currentSet.Contains(r))
+        // A listed role identity managed and the mirror lost on the same mirror was removed by the tenant: declined. A role
+        // whose definition is gone from the child was not declined: it is missing, and assigned again once it exists.
+        var newlyDeclined = managedBefore
+            .Where(r => desiredSet.Contains(r) && !currentSet.Contains(r) && existing.ContainsKey(r))
             .Order(comparer).ToList();
         declinedSet.UnionWith(newlyDeclined);
 
@@ -252,7 +261,7 @@ public sealed record MirrorRolePlan(
 }
 
 /// <summary>
-///     Assigns the roles of <c>Client.MirrorRoleNames</c> to the tracked mirrors of a client (AB#9923). Runs in the server's
+///     Assigns the roles of <c>Client.MirrorRoleNames</c> to the tracked mirrors of a client. Runs in the server's
 ///     system context after every mirror convergence (tenant setup, provisioning methods, update of the original, the
 ///     periodic reconciliation) and for <c>Client.SetMirrorRoles-1</c>.
 /// </summary>
@@ -330,16 +339,23 @@ internal sealed class ClientMirrorRoleReconciler(ILogger logger, IEventRepositor
             return MirrorRoleTenantResult.Empty(childTenantId, MirrorRoleOutcome.Skipped);
         }
 
-        // The caller may hand over the parent it has just read for the mirror convergence of the same pass.
-        var parent = parentClient is not null && string.Equals(parentClient.ClientId, clientId, StringComparison.Ordinal)
-            ? parentClient
-            : (await parentRepo.GetRtEntitiesByTypeAsync<RtClient>(parentSession, RtEntityQueryOptions.Create()
-                    .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId)))
-                .Items.FirstOrDefault(c => string.Equals(c.ClientId, clientId, StringComparison.Ordinal));
-        var desired = parent == null ? [] : ClientMirrorRoleRules.DesiredRoleNames(parent, plannedRoleNames);
+        // Cheap path for the common case, nothing listed and nothing tracked. The parent the caller read for the mirror
+        // convergence of the same pass is only a hint for it: a stale hint with an empty list skips nothing that this pass
+        // could have removed (nothing is tracked), and every other case reads the parent again below, inside the lock and
+        // after the row, so a list that was just cleared is never applied from an older copy.
+        var nothingTracked = IsEmpty(row.ManagedRoleNames) && IsEmpty(row.DeclinedRoleNames);
+        if (nothingTracked && plannedRoleNames == null && parentClient is not null &&
+            string.Equals(parentClient.ClientId, clientId, StringComparison.Ordinal) &&
+            ClientMirrorRoleRules.DesiredRoleNames(parentClient).Count == 0)
+        {
+            return MirrorRoleTenantResult.Empty(childTenantId, dryRun ? MirrorRoleOutcome.Planned : MirrorRoleOutcome.InSync);
+        }
 
-        // Cheap path for the common case: nothing listed and nothing tracked.
-        if (desired.Count == 0 && IsEmpty(row.ManagedRoleNames) && IsEmpty(row.DeclinedRoleNames))
+        var parent = (await parentRepo.GetRtEntitiesByTypeAsync<RtClient>(parentSession, RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId)))
+            .Items.FirstOrDefault(c => string.Equals(c.ClientId, clientId, StringComparison.Ordinal));
+        var desired = parent == null ? [] : ClientMirrorRoleRules.DesiredRoleNames(parent, plannedRoleNames);
+        if (desired.Count == 0 && nothingTracked)
         {
             return MirrorRoleTenantResult.Empty(childTenantId, dryRun ? MirrorRoleOutcome.Planned : MirrorRoleOutcome.InSync);
         }
@@ -358,8 +374,8 @@ internal sealed class ClientMirrorRoleReconciler(ILogger logger, IEventRepositor
         var nameById = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var role in roles)
         {
-            roleByName.TryAdd(role.Name!, role);
-            nameById[role.RtId.ToString()] = role.Name!;
+            roleByName.TryAdd(role.Name!.Trim(), role);
+            nameById[role.RtId.ToString()] = role.Name!.Trim();
         }
 
         var edges = (await childRepo.GetRtAssociationsAsync(childSession, mirror.ToRtEntityId(),

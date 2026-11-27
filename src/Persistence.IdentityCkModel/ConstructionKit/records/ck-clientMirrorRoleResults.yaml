@@ -1,5 +1,5 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
-# 3.9.0 (AB#9923): the result records of Client.SetMirrorRoles-1. They take the ckLanguage 2 default `derivable: Model`:
+# 3.9.0: the result records of Client.SetMirrorRoles-1. They take the ckLanguage 2 default `derivable: Model`:
 # answers, not extension points.
 records:
   - recordId: ClientMirrorRolesResult

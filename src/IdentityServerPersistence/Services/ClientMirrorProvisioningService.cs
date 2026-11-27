@@ -24,7 +24,7 @@ public class ClientMirrorProvisioningService(
     IEventRepository? eventRepository = null)
     : IClientMirrorProvisioningService
 {
-    /// <summary>AB#9923: assigns the roles of <c>Client.MirrorRoleNames</c> after every mirror convergence.</summary>
+    /// <summary>assigns the roles of <c>Client.MirrorRoleNames</c> after every mirror convergence.</summary>
     internal ClientMirrorRoleReconciler Roles { get; } = new(logger, eventRepository);
 
     /// <summary>
@@ -611,7 +611,7 @@ public class ClientMirrorProvisioningService(
         MissingParentPasses.TryRemove(missingKey, out _);
         if (write == MirrorWriteResult.InSync)
         {
-            // AB#9923: the backstop of the mirror roles; a no-op read for a mirror without a list or tracked roles.
+            // the backstop of the mirror roles; a no-op read for a mirror without a list or tracked roles.
             await Roles.ReconcileAsync(parentRepo, parentSession, parentTenantId, row.ParentClientId, row.ChildTenantId,
                 childRepo, plannedRoleNames: null, dryRun: false, parentClient: readParent);
             return MirrorReconcileOutcome.InSync;
@@ -1187,7 +1187,8 @@ public class ClientMirrorProvisioningService(
     }
 
     public async Task<ClientMirrorRolesResult?> SetMirrorRolesAsync(string parentTenantId, string parentClientId,
-        IReadOnlyList<string> roleNames, bool dryRun, CancellationToken cancellationToken = default)
+        IReadOnlyList<string> roleNames, bool dryRun, CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? expectedStoredRoleNames = null)
     {
         if (string.IsNullOrWhiteSpace(parentTenantId))
         {
@@ -1222,6 +1223,13 @@ public class ClientMirrorProvisioningService(
             var stored = await SystemStores.GuardedEntityMutation.MutateAsync(parentRepo,
                 session => FindParentClientAsync(parentRepo, session, parentClientId), client =>
                 {
+                    if (expectedStoredRoleNames != null &&
+                        !new HashSet<string>(client.MirrorRoleNames ?? Enumerable.Empty<string>(),
+                            StringComparer.OrdinalIgnoreCase).SetEquals(expectedStoredRoleNames))
+                    {
+                        throw new ClientMirrorRolesChangedException(parentClientId);
+                    }
+
                     if ((client.MirrorRoleNames ?? Enumerable.Empty<string>()).SequenceEqual(normalized,
                             StringComparer.Ordinal))
                     {

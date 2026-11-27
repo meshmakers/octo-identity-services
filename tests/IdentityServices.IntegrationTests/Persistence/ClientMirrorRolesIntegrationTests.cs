@@ -21,7 +21,7 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Persistence;
 
 /// <summary>
-///     AB#9923: a mirrored client gets the roles its original lists in <c>Client.MirrorRoleNames</c>, in every child tenant
+///     a mirrored client gets the roles its original lists in <c>Client.MirrorRoleNames</c>, in every child tenant
 ///     (nested ones included), idempotently; identity removes only the roles it manages, adopts listed hand grants, honours a
 ///     tenant's removal (declined) and never serves an untracked copy. Real MongoDB (Testcontainers), the production
 ///     provisioning service and tenant setup. The fixture seeds no blueprint, so the roles of a child are created in-test.
@@ -77,16 +77,18 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
         row.ManagedRoleNames.Should().BeEquivalentTo(Deploy);
         row.ManagedMirrorRtId.Should().Be((await MirrorAsync(system, child, clientId))!.RtId.ToString());
 
-        var version = row.RtVersion;
         await service.ProvisionForChildTenantAsync(system.TenantId, child);
+        var before = (await TrackingRowAsync(system, clientId, child))!;
         var result = await service.SetMirrorRolesAsync(system.TenantId, clientId, [Deploy], dryRun: false, Ct);
+        var after = (await TrackingRowAsync(system, clientId, child))!;
 
         (await MirrorRolesAsync(system, child, clientId)).Should().BeEquivalentTo(Deploy);
         (await EdgeCountAsync(system, child, clientId)).Should().Be(1, "no second edge");
         result!.Tenants.Should().ContainSingle(t => t.ChildTenantId == child)
             .Which.Outcome.Should().Be(MirrorRoleOutcome.InSync);
-        (await TrackingRowAsync(system, clientId, child))!.RtVersion.Should().BeGreaterThanOrEqualTo(version);
-        (await TrackingRowAsync(system, clientId, child))!.ManagedRoleNames.Should().BeEquivalentTo(Deploy);
+        after.RtVersion.Should().Be(before.RtVersion, "a pass with nothing to change does not write the tracking row");
+        after.ManagedRoleNames.Should().BeEquivalentTo(Deploy);
+        after.ManagedMirrorRtId.Should().Be(before.ManagedMirrorRtId);
     }
 
     [Fact]
@@ -163,7 +165,7 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
         await CreateConfidentialClientAsync(system, clientId);
         var child = await CreateChildAsync(system);
         await service.ProvisionForChildTenantAsync(system.TenantId, child);
-        await AddEdgeAsync(system, child, clientId, Deploy); // the hand grant of AB#9562
+        await AddEdgeAsync(system, child, clientId, Deploy); // a hand grant made before the list existed
         await AddEdgeAsync(system, child, clientId, Bot);
 
         var plan = await service.SetMirrorRolesAsync(system.TenantId, clientId, [Deploy], dryRun: true, Ct);
@@ -247,6 +249,22 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
     }
 
     [Fact]
+    public async Task ListChangedByAnotherWriter_SinceTheCallerJudgedIt_IsRefused_AndNothingIsWritten()
+    {
+        var (system, service) = await InitializeAsync();
+        var clientId = NewClientId("conc");
+        await CreateConfidentialClientAsync(system, clientId);
+        await service.SetMirrorRolesAsync(system.TenantId, clientId, [Viewer], dryRun: false, Ct);
+
+        // The caller judged its change against an empty list; meanwhile the stored list is [Viewer].
+        var act = () => service.SetMirrorRolesAsync(system.TenantId, clientId, [Viewer, Deploy], dryRun: false, Ct,
+            expectedStoredRoleNames: []);
+
+        await act.Should().ThrowAsync<ClientMirrorRolesChangedException>();
+        (await StoredListAsync(system, clientId)).Should().Equal(Viewer);
+    }
+
+    [Fact]
     public async Task UntrackedCopyWithTheSameClientId_GetsNoRoles()
     {
         var (system, service) = await InitializeAsync();
@@ -254,7 +272,7 @@ public class ClientMirrorRolesIntegrationTests : IClassFixture<IdentityServicesF
         await CreateConfidentialClientAsync(system, clientId, autoProvision: false);
         await service.SetMirrorRolesAsync(system.TenantId, clientId, [Deploy], dryRun: false, Ct);
         var child = await CreateChildAsync(system);
-        // A copy restored from another cluster's dump (AB#8533): the mirror marker, but no tracking row of this parent.
+        // A copy restored from another cluster's dump: the mirror marker, but no tracking row of this parent.
         await InsertChildClientAsync(system, child, clientId, provisionedBy: system.TenantId);
 
         await service.ProvisionForChildTenantAsync(system.TenantId, child);

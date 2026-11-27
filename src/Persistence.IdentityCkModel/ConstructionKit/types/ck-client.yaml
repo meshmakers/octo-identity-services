@@ -173,7 +173,7 @@ types:
         name: ProvisionedByParentTenantId
         isOptional: true
 
-      # 3.9.0 (AB#9923): the roles the mirrors of this client get in the child tenants (row T1: optional attribute, Minor).
+      # 3.9.0: the roles the mirrors of this client get in the child tenants (row T1: optional attribute, Minor).
       - id: ${this}/MirrorRoleNames
         name: MirrorRoleNames
         isOptional: true
@@ -385,7 +385,7 @@ types:
         execution:
           timeoutSeconds: 30
           idempotent: true
-      # 3.9.0 (AB#9923): the roles the mirrors of the client get in every child tenant. Stricter than AddRole-1 (TenantManagement
+      # 3.9.0: the roles the mirrors of the client get in every child tenant. Stricter than AddRole-1 (TenantManagement
       # only, not UserManagement), because the effect reaches every child tenant, also future ones. The handler also refuses a
       # deny-listed role (MIRROR_ROLE_NOT_ALLOWED), a public client or one without client_credentials (CLIENT_NOT_CONFIDENTIAL),
       # a mirror as target, a built-in role the caller does not hold and the caller's own client (METHOD_FORBIDDEN).

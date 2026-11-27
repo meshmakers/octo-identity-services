@@ -4,7 +4,7 @@
 
 _Required bump level: minor._
 
-System.Identity 3.9.0 lets a client hand roles to its mirrors in the child tenants (AB#9923): the original carries the allow-list
+System.Identity 3.9.0 lets a client hand roles to its mirrors in the child tenants: the original carries the allow-list
 `Client.MirrorRoleNames`, the tracking row `ClientMirror` records what identity assigned on each mirror, and `Client.SetMirrorRoles-1`
 sets the list (with a dry run) and reconciles the mirrors. With the default empty list nothing changes for any existing client or
 mirror. Compile gate against 3.8.0: required level MINOR, nothing to acknowledge.

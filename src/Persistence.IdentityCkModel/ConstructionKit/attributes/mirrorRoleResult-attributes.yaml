@@ -1,5 +1,5 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
-# 3.9.0 (AB#9923): members of the Client.SetMirrorRoles-1 result records (records/ck-clientMirrorRoleResults.yaml). They are
+# 3.9.0: members of the Client.SetMirrorRoles-1 result records (records/ck-clientMirrorRoleResults.yaml). They are
 # answers of a method call and are never stored on an entity or seeded, hence RuntimeState.
 attributes:
   - id: MirrorRolesResultRoleNames

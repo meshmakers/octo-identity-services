@@ -725,7 +725,7 @@ attributes:
     ownership: SeedOwned
     description: When set on a Client living in a child tenant, marks this record as a mirror of a parent-tenant client identified by the given tenant id. Sub-tenant admins surface this as a read-only "Provisioned by parent tenant" indicator; the operator cannot edit the client locally — changes must go through the parent.
 
-  # 3.9.0 (AB#9923): roles a client hands to its mirrors. The list lives on the original (TenantOwned: a blueprint update of
+  # 3.9.0: roles a client hands to its mirrors. The list lives on the original (TenantOwned: a blueprint update of
   # the client never resets the operator's choice); the tracking row records what identity assigned on each mirror.
   - id: MirrorRoleNames
     valueType: StringArray

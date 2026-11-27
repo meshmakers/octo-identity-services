@@ -308,7 +308,7 @@ with update and delete, `ExternalTenantUserMapping.UpdateMapping-1` / `DeleteMap
   (compiler error 133). `writeAccess` (3.6.0) already refuses every caller-scoped generic create, and the Bootstrap blueprint keeps seeding
   clients and data permissions through the system import.
 
-## Mirror role list (System.Identity 3.9.0, AB#9923)
+## Mirror role list (System.Identity 3.9.0)
 
 3.9.0 adds the optional attribute `Client.MirrorRoleNames` (StringArray, `TenantOwned`, so a System.Identity.Bootstrap update never
 resets an operator's list), the optional tracking attributes `ClientMirror.ManagedRoleNames`, `ClientMirror.DeclinedRoleNames`

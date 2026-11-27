@@ -43,7 +43,7 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Security
 
-- **Mirrored clients get the roles their original lists (AB#9923, System.Identity 3.9.0).** A confidential client-credentials
+- **Mirrored clients get the roles their original lists (System.Identity 3.9.0).** A confidential client-credentials
   client carries `MirrorRoleNames`; identity assigns exactly these roles to every tracked mirror in every child tenant (nested and
   new tenants included) after each mirror convergence (tenant setup, `ReRunTenantSetup`, `Client.ProvisionMirrorInTenant-1`,
   `Client.ProvisionMirrors-1`, update of the original, the periodic reconciliation), idempotently. New method
@@ -55,7 +55,7 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   untracked copy of the client. Every grant, removal, adoption and decline is an event in the child tenant. A missing role is a
   WARN; a failed write never fails a tenant setup and is retried by the next pass. With the default empty list nothing changes.
   ⚠️ The inherited parent secret is still accepted by every mirror, so one leaked secret of such a client holds the mirrored role
-  in every tenant: keep lists short (narrow deploy role AB#9894). See `docs/client-mirroring.md`, `docs/identity-methods.md`.
+  in every tenant: keep lists short (prefer a narrow deploy role). See `docs/client-mirroring.md`, `docs/identity-methods.md`.
 
 - **Every token of an agent client carries `octo_agent` (AB#6054).** A client whose allowed scopes contain
   `octo_agent` gets tokens only through `client_credentials`; `octo_agent` is added when the request names no scope;

@@ -7,7 +7,7 @@ using Xunit;
 namespace IdentityServerPersistence.UnitTests.Services;
 
 /// <summary>
-///     AB#9923: the rules of the mirror role list (deny-list, confidential clients only) and the per-mirror plan (add, adopt,
+///     the rules of the mirror role list (deny-list, confidential clients only) and the per-mirror plan (add, adopt,
 ///     remove only managed, hand-set untouched, declined by the tenant, re-created mirror, missing role). Pure: no database.
 /// </summary>
 public class ClientMirrorRolePlanTests
@@ -165,6 +165,20 @@ public class ClientMirrorRolePlanTests
         plan.Remove.Should().BeEmpty("the edge is gone already");
         plan.NewlyDeclined.Should().BeEmpty("only a listed role can be declined");
         plan.Managed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ManagedRoleWhoseDefinitionIsGoneFromTheChild_IsMissing_NotDeclined()
+    {
+        var plan = MirrorRolePlan.Compute(["MirrorTestRole"], ChildRoles, current: [], managed: ["MirrorTestRole"],
+            declined: [], sameMirror: true);
+
+        plan.NewlyDeclined.Should().BeEmpty("the tenant deleted the role definition, it did not take the role away");
+        plan.RoleMissing.Should().Equal("MirrorTestRole");
+
+        var recreated = MirrorRolePlan.Compute(["MirrorTestRole"], [.. ChildRoles, "MirrorTestRole"], current: [],
+            plan.Managed, plan.DeclinedAfter, sameMirror: true);
+        recreated.Add.Should().Equal(["MirrorTestRole"], "a re-created role is assigned on the first pass after it exists");
     }
 
     [Fact]

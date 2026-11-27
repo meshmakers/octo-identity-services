@@ -435,8 +435,8 @@ internal sealed class ClientSetMirrorAutoProvisionHandler(IServiceProvider servi
 }
 
 /// <summary>
-///     Handler of <c>System.Identity/Client.SetMirrorRoles-1</c> (System.Identity 3.9.0, AB#9923): sets the roles the mirrors
-///     of the client get in every child tenant and reconciles the tracked mirrors. No REST facade (Epic AB#9221: methods only).
+///     Handler of <c>System.Identity/Client.SetMirrorRoles-1</c> (System.Identity 3.9.0): sets the roles the mirrors
+///     of the client get in every child tenant and reconciles the tracked mirrors. No REST facade (Epic methods only).
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -474,7 +474,13 @@ internal sealed class ClientSetMirrorRolesHandler(IServiceProvider services)
         RtClient client, ClientSetMirrorRolesParameters parameters, string tenantId, CancellationToken cancellationToken)
     {
         var dryRun = parameters.DryRun ?? false;
-        var names = ClientMirrorRoleRules.Normalize(parameters.RoleNames ?? []);
+        if (parameters.RoleNames == null)
+        {
+            // Required: an omitted list must never read as "clear the list" (that removes the managed roles everywhere).
+            return CrossTenantMethodSupport.ValidationFailed("roleNames");
+        }
+
+        var names = ClientMirrorRoleRules.Normalize(parameters.RoleNames);
         call.Details["roleNames"] = string.Join(",", names);
         call.Details["dryRun"] = dryRun ? "true" : "false";
 
@@ -526,10 +532,12 @@ internal sealed class ClientSetMirrorRolesHandler(IServiceProvider services)
         ClientMirrorRolesResult? result;
         try
         {
+            // The list the guard judged against travels along: when another writer changed the stored list since, the
+            // write is refused, so a role the caller does not hold is never stored unchecked.
             result = await MirrorService.SetMirrorRolesAsync(tenantId, client.ClientId!, names, dryRun,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken, expectedStoredRoleNames: client.MirrorRoleNames?.ToList() ?? []).ConfigureAwait(false);
         }
-        catch (RtVersionConflictException)
+        catch (Exception ex) when (ex is RtVersionConflictException or ClientMirrorRolesChangedException)
         {
             return new CkMethodFailure(ClientMirrorMethodErrors.ConcurrentChange);
         }
